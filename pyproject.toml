@@ -1,15 +1,16 @@
 [tool.poetry]
 name = "roguelike"
 version = "0.1.0"
-description = "A modern Rogue-like game"
-authors = ["Your Name <your.email@example.com>"]
+description = "A modern roguelike game"
+authors = ["yuru-sha"]
+license = "MIT"
 readme = "README.md"
 packages = [{include = "roguelike", from = "src"}]
 
 [tool.poetry.dependencies]
 python = "^3.12"
-tcod = "^16.2.3"
-tcod-ecs = "^5.2.3"
+tcod = "16.2.2"
+tcod-ecs = "5.1.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.3"
