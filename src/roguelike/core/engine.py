@@ -1,12 +1,14 @@
 import tcod
 import numpy as np
+import esper
 from typing import Optional, Tuple, Union
-from tcod_ecs import World
 
 from roguelike.world.map.dungeon import generate_dungeon
 from roguelike.world.map.game_map import GameMap
 from roguelike.world.entity.factory import EntityFactory
 from roguelike.world.entity.systems import EntitySystem
+from roguelike.world.entity.ai import AISystem
+from roguelike.world.entity.components import Position
 from roguelike.utils.logger import logger
 
 class Engine:
@@ -27,9 +29,10 @@ class Engine:
         self.max_messages = 5
         
         # ECS
-        self.world = World()
+        self.world = esper.World()
         self.entity_factory = EntityFactory(self.world)
         self.entity_system = EntitySystem(self.world)
+        self.ai_system = AISystem(self.world, self.entity_system)
         
         # プレイヤー
         self.player_entity = None
@@ -40,6 +43,9 @@ class Engine:
         # FOV
         self.fov_recompute = True
         self.visible = None
+        
+        # キーム状態
+        self.game_state = "player_turn"  # "player_turn" or "enemy_turn"
         
         # キー設定
         self.MOVE_KEYS = {
@@ -92,8 +98,15 @@ class Engine:
             room_max_size=10,
         )
         
+        # EntitySystemにゲームマップを設定
+        self.entity_system.set_game_map(self.game_map)
+        
         # プレイヤーの作成
         self.player_entity = self.entity_factory.create_player(player_x, player_y)
+        
+        # テスト用モンスターの配置
+        self.entity_factory.create_monster(player_x + 5, player_y, "orc")
+        self.entity_factory.create_monster(player_x - 5, player_y, "troll")
         
         # FOVの初期化
         self.visible = np.zeros((self.game_map.height, self.game_map.width), dtype=bool)
@@ -102,50 +115,12 @@ class Engine:
         self.add_message("Hello Stranger, welcome to the Dungeons of Doom!")
         self.add_message("Your quest is to retrieve the Amulet of Yendor.")
         self.add_message("Press '?' for help.")
-
-    def render(self) -> None:
-        """画面の描画"""
-        # FOVの再計算
-        if self.fov_recompute:
-            player_pos = self.world.get_component(self.player_entity, Position)
-            self.visible = self.game_map.compute_fov(player_pos.x, player_pos.y)
-            self.fov_recompute = False
-        
-        # コンソールをクリア
-        self.console.clear()
-        
-        # マップの描画
-        self.game_map.render(self.console, self.visible)
-        
-        # エンティティの描画
-        for entity, (pos,) in self.world.get_components((Position,)):
-            if not self.visible[pos.y, pos.x]:
-                continue
-                
-            render_data = self.entity_system.get_renderable_data(entity)
-            if render_data:
-                char, fg, bg = render_data
-                self.console.ch[pos.y, pos.x] = ord(char)
-                self.console.fg[pos.y, pos.x] = fg
-                self.console.bg[pos.y, pos.x] = bg
-        
-        # ステータス情報の表示
-        status_y = self.map_height
-        fighter = self.entity_system.get_fighter_data(self.player_entity)
-        status_text = f"HP: {fighter.hp}/{fighter.max_hp}  Floor: 1  Turn: 0"
-        self.console.print(x=0, y=status_y, string=status_text, fg=(255, 255, 255))
-        
-        # メッセージの表示
-        message_y = status_y + self.status_height
-        for i, message in enumerate(self.messages[-self.message_height:]):
-            self.console.print(x=0, y=message_y + i, string=message, fg=(255, 255, 255))
-        
-        # 画面の更新
-        self.context.present(self.console)
     
     def update(self) -> None:
         """ゲームの状態更新"""
-        pass
+        if self.game_state == "enemy_turn":
+            self.ai_system.update(self.game_map, self.player_entity)
+            self.game_state = "player_turn"
     
     def handle_events(self) -> bool:
         """イベント処理"""
@@ -159,9 +134,9 @@ class Engine:
                 logger.info("Quit action triggered")
                 return False
             
-            if isinstance(action, tuple):
+            if isinstance(action, tuple) and self.game_state == "player_turn":
                 dx, dy = action
-                player_pos = self.world.get_component(self.player_entity, Position)
+                player_pos = self.world.component_for_entity(self.player_entity, Position)
                 new_x = player_pos.x + dx
                 new_y = player_pos.y + dy
                 
@@ -170,6 +145,7 @@ class Engine:
                     if self.game_map.walkable[new_y, new_x]:
                         if self.entity_system.move_entity(self.player_entity, dx, dy):
                             self.fov_recompute = True
+                            self.game_state = "enemy_turn"
                         
         return True
     
@@ -179,6 +155,10 @@ class Engine:
             return "quit"
         
         if not isinstance(event, tcod.event.KeyDown):
+            return None
+            
+        # キーリピートを無視
+        if event.repeat:
             return None
         
         key = event.sym
@@ -202,3 +182,43 @@ class Engine:
         if len(self.messages) > self.max_messages:
             self.messages.pop(0)
         logger.debug(f"Added message: {text}") 
+    
+    def render(self) -> None:
+        """画面の描画"""
+        # FOVの再計算
+        if self.fov_recompute:
+            player_pos = self.world.component_for_entity(self.player_entity, Position)
+            self.visible = self.game_map.compute_fov(player_pos.x, player_pos.y)
+            self.fov_recompute = False
+        
+        # コンソールをクリア
+        self.console.clear()
+        
+        # マップの描画
+        self.game_map.render(self.console, self.visible)
+        
+        # エンティティの描画
+        for ent, (pos,) in self.world.get_components(Position):
+            if not self.visible[pos.y, pos.x]:
+                continue
+                
+            render_data = self.entity_system.get_renderable_data(ent)
+            if render_data:
+                char, fg, bg = render_data
+                self.console.ch[pos.y, pos.x] = ord(char)
+                self.console.fg[pos.y, pos.x] = fg
+                self.console.bg[pos.y, pos.x] = bg
+        
+        # ステータス情報の表示
+        status_y = self.map_height
+        fighter = self.entity_system.get_fighter_data(self.player_entity)
+        status_text = f"HP: {fighter.hp}/{fighter.max_hp}  Floor: 1  Turn: 0"
+        self.console.print(x=0, y=status_y, string=status_text, fg=(255, 255, 255))
+        
+        # メッセージの表示
+        message_y = status_y + self.status_height
+        for i, message in enumerate(self.messages[-self.message_height:]):
+            self.console.print(x=0, y=message_y + i, string=message, fg=(255, 255, 255))
+        
+        # 画面の更新
+        self.context.present(self.console) 

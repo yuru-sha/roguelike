@@ -70,8 +70,8 @@
 # 技術スタック
 ## コア技術
 - Python ^3.12
-- TCOD ^16.2.3
-- tcod-ecs ^5.2.3 (Entity Component System)
+- TCOD ^16.2.2
+- esper ^2.5 (Entity Component System)
 - pytest (Testing)
 - black (Formatter)
 - mypy (Type Checker)

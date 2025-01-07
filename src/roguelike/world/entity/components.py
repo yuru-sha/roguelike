@@ -1,5 +1,11 @@
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Tuple, Optional
+from enum import Enum, auto
+
+class AIType(Enum):
+    """AI行動タイプ"""
+    HOSTILE = auto()  # 敵対的（プレイヤーを追跡して攻撃）
+    CONFUSED = auto() # 混乱（ランダムに移動）
 
 @dataclass
 class Position:
@@ -25,7 +31,8 @@ class Fighter:
 @dataclass
 class AI:
     """AI行動コンポーネント"""
-    pass  # 具体的なAI実装は後で追加
+    ai_type: AIType = AIType.HOSTILE
+    turns_remaining: Optional[int] = None  # 特殊状態の残りターン数（Noneは無制限）
 
 @dataclass
 class Item:
