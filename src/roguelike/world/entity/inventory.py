@@ -55,7 +55,7 @@ class InventorySystem:
         
         # 新しいスロットが必要な場合
         if len(inventory.items) >= inventory.capacity:
-            logger.info("Your pack is too full.")
+            logger.info("Your pack is full (26 items max).")
             return False
             
         inventory.items.append(item)

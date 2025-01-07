@@ -92,7 +92,7 @@ class Engine:
         
         # フォントの設定
         tileset = tcod.tileset.load_tilesheet(
-            "roguelike/assets/dejavu10x10_gs_tc.png",
+            "src/roguelike/assets/dejavu10x10_gs_tc.png",
             32, 8, tcod.tileset.CHARMAP_TCOD,
         )
         
