@@ -1,7 +1,7 @@
 from typing import List, Tuple, Optional, Any
 import esper
 
-from roguelike.world.entity.components import Position, Renderable, Fighter, AI
+from roguelike.world.entity.components import Position, Renderable, Fighter, AI, Item
 from roguelike.utils.logger import logger
 
 class EntitySystem:
@@ -23,7 +23,7 @@ class EntitySystem:
         return None
     
     def move_entity(self, entity: int, dx: int, dy: int) -> bool:
-        """エンティティを移動"""
+        """エンティティを移動する"""
         if not self.world.has_component(entity, Position):
             return False
             
@@ -32,35 +32,37 @@ class EntitySystem:
         new_y = pos.y + dy
         
         # マップ境界チェック
-        if not hasattr(self, 'game_map'):
-            logger.warning("No game map reference in EntitySystem")
+        if not self.game_map.in_bounds(new_x, new_y):
             return False
             
-        if not (0 <= new_x < self.game_map.width and 0 <= new_y < self.game_map.height):
-            return False
-            
-        # 壁判定
+        # 壁チェック
         if not self.game_map.walkable[new_y, new_x]:
             return False
+            
+        # 他のエンティティとの衝突チェック
+        for ent in self.get_entities_at(new_x, new_y):
+            # アイテムは通過可能
+            if self.world.has_component(ent, Item):
+                continue
+            # 戦闘可能なエンティティ同士は衝突
+            if (self.world.has_component(entity, Fighter) and 
+                self.world.has_component(ent, Fighter)):
+                return False
         
-        # 移動先に他のエンティティがいないか確認
-        blocking_entity = self.get_blocking_entity_at_location(new_x, new_y)
-        if blocking_entity is not None:
-            logger.debug(f"Entity {entity} blocked by entity {blocking_entity} at ({new_x}, {new_y})")
-            return False
-        
+        # 移動
         pos.x = new_x
         pos.y = new_y
-        logger.debug(f"Entity {entity} moved to ({new_x}, {new_y})")
+        
         return True
     
     def get_entities_at(self, x: int, y: int) -> List[int]:
-        """指定位置にいるすべてのエンティティを取得"""
+        """指定座標にあるエンティティのリストを返す"""
         entities = []
         for ent, (pos,) in self.world.get_components(Position):
             if pos.x == x and pos.y == y:
                 entities.append(ent)
-        return entities
+        # エンティティIDの小さい順（生成順）にソート
+        return sorted(entities)
     
     def get_renderable_data(self, entity: int) -> Optional[Tuple[str, Tuple[int, int, int], Tuple[int, int, int]]]:
         """エンティティの描画データを取得"""

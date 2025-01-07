@@ -1,4 +1,4 @@
-from typing import Iterator, List, Tuple
+from typing import Iterator, List, Tuple, Any
 import random
 import tcod
 import numpy as np
@@ -6,6 +6,7 @@ import numpy as np
 from roguelike.world.map.game_map import GameMap
 from roguelike.world.map.tile import floor, wall
 from roguelike.utils.logger import logger
+from roguelike.world.entity.factory import EntityFactory
 
 class RectangularRoom:
     def __init__(self, x: int, y: int, width: int, height: int):
@@ -45,6 +46,7 @@ def generate_dungeon(
     max_rooms: int,
     room_min_size: int,
     room_max_size: int,
+    world: Any,
 ) -> Tuple[GameMap, Tuple[int, int]]:
     """ダンジョンを生成する"""
     logger.info(f"Generating dungeon {map_width}x{map_height} with {max_rooms} rooms")
@@ -52,6 +54,7 @@ def generate_dungeon(
     
     dungeon = GameMap(map_width, map_height)
     rooms: List[RectangularRoom] = []
+    entity_factory = EntityFactory(world)
     
     for r in range(max_rooms):
         # ランダムな部屋を生成（Rogueライクな小さめの部屋）
@@ -111,6 +114,42 @@ def generate_dungeon(
         rooms.append(new_room)
     
     logger.info(f"Generated {len(rooms)} rooms")
+    
+    # モンスターの配置
+    for room in rooms[1:]:
+        if random.random() < 0.8:  # 80%の確率でモンスターを配置
+            x = random.randint(room.x1 + 1, room.x2 - 1)
+            y = random.randint(room.y1 + 1, room.y2 - 1)
+            
+            if random.random() < 0.8:  # 80%の確率でオーク
+                entity_factory.create_monster(x, y, "orc")
+            else:  # 20%の確率でトロル
+                entity_factory.create_monster(x, y, "troll")
+    
+    # アイテムの配置
+    for room in rooms:
+        if random.random() < 0.7:  # 70%の確率でアイテムを配置
+            x = random.randint(room.x1 + 1, room.x2 - 1)
+            y = random.randint(room.y1 + 1, room.y2 - 1)
+            
+            item_chance = random.random()
+            if item_chance < 0.4:  # 40%の確率で回復ポーション
+                entity_factory.create_healing_potion(x, y)
+            elif item_chance < 0.5:  # 10%の確率で剣
+                entity_factory.create_sword(x, y)
+            elif item_chance < 0.6:  # 10%の確率で盾
+                entity_factory.create_shield(x, y)
+            elif item_chance < 0.7:  # 10%の確率で雷の巻物
+                entity_factory.create_lightning_scroll(x, y)
+            elif item_chance < 0.8:  # 10%の確率でファイアーボールの巻物
+                entity_factory.create_fireball_scroll(x, y)
+            elif item_chance < 0.9:  # 10%の確率で混乱の巻物
+                entity_factory.create_confusion_scroll(x, y)
+            elif item_chance < 0.95:  # 5%の確率で麻痺の巻物
+                entity_factory.create_paralyze_scroll(x, y)
+            else:  # 5%の確率で狂戦士化のポーション
+                entity_factory.create_berserk_potion(x, y)
+    
     return dungeon, player_start
 
 def tunnel_between(
