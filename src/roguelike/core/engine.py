@@ -14,6 +14,7 @@ from roguelike.world.entity.components import (
     Name,
     Inventory,
     Fighter,
+    Equipment,
 )
 from roguelike.utils.logger import logger
 from roguelike.world.entity.inventory import InventorySystem
@@ -274,23 +275,88 @@ class Engine:
         if not inventory.items:
             self.add_message("Your inventory is empty.")
             return
-            
-        # インベントリの表示（実装は後で）
-        # 今は最初のアイテムを使用/ドロップする
-        item = inventory.items[0]
         
-        if drop:
-            if self.inventory_system.remove_item(self.player_entity, item):
-                player_pos = self.world.component_for_entity(self.player_entity, Position)
-                # アイテムをプレイヤーの位置に戻す
-                self.world.add_component(item, Position(x=player_pos.x, y=player_pos.y))
-                self.game_state = "enemy_turn"
-        else:
-            item_component = self.world.component_for_entity(item, Item)
-            if item_component.targeting:
-                self.targeting_item = item
-                self.game_state = "targeting"
-                self.add_message(item_component.targeting_message or "Left-click a target tile.")
+        # インベントリウィンドウの設定
+        window_width = 30
+        window_height = len(inventory.items) + 2
+        window_x = self.screen_width // 2 - window_width // 2
+        window_y = self.screen_height // 2 - window_height // 2
+        
+        # ウィンドウの描画
+        window = tcod.console.Console(window_width, window_height, order="F")
+        window.draw_frame(
+            x=0,
+            y=0,
+            width=window_width,
+            height=window_height,
+            title="Inventory",
+            clear=True,
+            fg=(255, 255, 255),
+            bg=(0, 0, 0),
+        )
+        
+        # アイテム一覧の表示
+        for i, item in enumerate(inventory.items):
+            name = self.world.component_for_entity(item, Name)
+            key = chr(ord('a') + i)  # a, b, c, ...
+            
+            # 装備品の場合は装備状態を表示
+            if self.world.has_component(item, Equipment):
+                equipment = self.world.component_for_entity(item, Equipment)
+                if equipment.is_equipped:
+                    text = f"{key}) {name.name} (equipped)"
+                else:
+                    text = f"{key}) {name.name}"
             else:
-                if self.inventory_system.use_item(self.player_entity, item):
-                    self.game_state = "enemy_turn" 
+                text = f"{key}) {name.name}"
+            
+            window.print(x=1, y=i+1, string=text)
+        
+        # メインコンソールにウィンドウを合成
+        window.blit(
+            dest=self.console,
+            dest_x=window_x,
+            dest_y=window_y,
+            src_x=0,
+            src_y=0,
+            width=window_width,
+            height=window_height,
+            fg_alpha=1.0,
+            bg_alpha=0.7,
+        )
+        
+        # 画面の更新
+        self.context.present(self.console)
+        
+        # キー入力待ち
+        while True:
+            for event in tcod.event.wait():
+                if not isinstance(event, tcod.event.KeyDown):
+                    continue
+                    
+                # ESCキーでキャンセル
+                if event.sym == tcod.event.KeySym.ESCAPE:
+                    return
+                
+                # アイテムの選択（a-z）
+                index = event.sym - tcod.event.KeySym.a
+                if 0 <= index < len(inventory.items):
+                    selected_item = inventory.items[index]
+                    if drop:
+                        if self.inventory_system.remove_item(self.player_entity, selected_item):
+                            player_pos = self.world.component_for_entity(self.player_entity, Position)
+                            # アイテムをプレイヤーの位置に戻す
+                            self.world.add_component(selected_item, Position(x=player_pos.x, y=player_pos.y))
+                            name = self.world.component_for_entity(selected_item, Name)
+                            self.add_message(f"You dropped the {name.name}.")
+                            self.game_state = "enemy_turn"
+                    else:
+                        item_component = self.world.component_for_entity(selected_item, Item)
+                        if item_component.targeting:
+                            self.targeting_item = selected_item
+                            self.game_state = "targeting"
+                            self.add_message(item_component.targeting_message or "Left-click a target tile.")
+                        else:
+                            if self.inventory_system.use_item(self.player_entity, selected_item):
+                                self.game_state = "enemy_turn"
+                    return 
