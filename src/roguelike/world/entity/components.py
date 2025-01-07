@@ -6,6 +6,8 @@ class AIType(Enum):
     """AI行動タイプ"""
     HOSTILE = auto()  # 敵対的（プレイヤーを追跡して攻撃）
     CONFUSED = auto() # 混乱（ランダムに移動）
+    PARALYZED = auto()  # 麻痺（行動不能）
+    FLEEING = auto()    # 逃走（プレイヤーから離れる）
 
 @dataclass
 class Position:

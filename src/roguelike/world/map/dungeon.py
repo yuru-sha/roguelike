@@ -133,14 +133,22 @@ def generate_dungeon(
             y = random.randint(room.y1 + 1, room.y2 - 1)
             
             item_chance = random.random()
-            if item_chance < 0.7:  # 70%の確率で回復ポーション
+            if item_chance < 0.4:  # 40%の確率で回復ポーション
                 entity_factory.create_healing_potion(x, y)
-            elif item_chance < 0.8:  # 10%の確率で剣
+            elif item_chance < 0.5:  # 10%の確率で剣
                 entity_factory.create_sword(x, y)
-            elif item_chance < 0.9:  # 10%の確率で盾
+            elif item_chance < 0.6:  # 10%の確率で盾
                 entity_factory.create_shield(x, y)
-            else:  # 10%の確率で雷の巻物
+            elif item_chance < 0.7:  # 10%の確率で雷の巻物
                 entity_factory.create_lightning_scroll(x, y)
+            elif item_chance < 0.8:  # 10%の確率でファイアーボールの巻物
+                entity_factory.create_fireball_scroll(x, y)
+            elif item_chance < 0.9:  # 10%の確率で混乱の巻物
+                entity_factory.create_confusion_scroll(x, y)
+            elif item_chance < 0.95:  # 5%の確率で麻痺の巻物
+                entity_factory.create_paralyze_scroll(x, y)
+            else:  # 5%の確率で狂戦士化のポーション
+                entity_factory.create_berserk_potion(x, y)
     
     return dungeon, player_start
 

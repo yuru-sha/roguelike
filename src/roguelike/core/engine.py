@@ -140,6 +140,9 @@ class Engine:
     def handle_events(self) -> bool:
         """イベント処理"""
         for event in tcod.event.wait():
+            # マウスイベントの変換
+            event = self.context.convert_event(event)
+            
             # ターゲット選択中のマウスクリック
             if self.game_state == "targeting" and isinstance(event, tcod.event.MouseButtonDown):
                 if event.button == tcod.event.MouseButton.LEFT:

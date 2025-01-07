@@ -175,3 +175,84 @@ class EntityFactory:
         ))
         
         return shield 
+    
+    def create_fireball_scroll(self, x: int, y: int) -> int:
+        """ファイアーボールの巻物を作成"""
+        scroll = self.world.create_entity()
+        
+        self.world.add_component(scroll, Position(x=x, y=y))
+        self.world.add_component(scroll, Renderable(
+            char="?",
+            fg_color=(200, 0, 0),
+            bg_color=(0, 0, 0)
+        ))
+        self.world.add_component(scroll, Name(name="Fireball Scroll"))
+        self.world.add_component(scroll, Item(
+            use_function=cast_fireball,
+            targeting=True,
+            targeting_message="Left-click a target tile to cast fireball",
+            damage=12,
+            radius=3
+        ))
+        
+        return scroll
+    
+    def create_confusion_scroll(self, x: int, y: int) -> int:
+        """混乱の巻物を作成"""
+        scroll = self.world.create_entity()
+        
+        self.world.add_component(scroll, Position(x=x, y=y))
+        self.world.add_component(scroll, Renderable(
+            char="?",
+            fg_color=(200, 200, 0),
+            bg_color=(0, 0, 0)
+        ))
+        self.world.add_component(scroll, Name(name="Confusion Scroll"))
+        self.world.add_component(scroll, Item(
+            use_function=cast_confusion,
+            targeting=True,
+            targeting_message="Left-click an enemy to confuse it",
+            turns=10
+        ))
+        
+        return scroll
+    
+    def create_paralyze_scroll(self, x: int, y: int) -> int:
+        """麻痺の巻物を作成"""
+        scroll = self.world.create_entity()
+        
+        self.world.add_component(scroll, Position(x=x, y=y))
+        self.world.add_component(scroll, Renderable(
+            char="?",
+            fg_color=(0, 200, 200),
+            bg_color=(0, 0, 0)
+        ))
+        self.world.add_component(scroll, Name(name="Paralysis Scroll"))
+        self.world.add_component(scroll, Item(
+            use_function=cast_paralyze,
+            targeting=True,
+            targeting_message="Left-click an enemy to paralyze it",
+            turns=5
+        ))
+        
+        return scroll
+    
+    def create_berserk_potion(self, x: int, y: int) -> int:
+        """狂戦士化のポーションを作成"""
+        potion = self.world.create_entity()
+        
+        self.world.add_component(potion, Position(x=x, y=y))
+        self.world.add_component(potion, Renderable(
+            char="!",
+            fg_color=(200, 0, 200),
+            bg_color=(0, 0, 0)
+        ))
+        self.world.add_component(potion, Name(name="Berserk Potion"))
+        self.world.add_component(potion, Item(
+            use_function=cast_berserk,
+            targeting=False,
+            power_bonus=5,
+            turns=20
+        ))
+        
+        return potion 
