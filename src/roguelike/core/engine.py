@@ -1,9 +1,12 @@
 import tcod
 import numpy as np
 from typing import Optional, Tuple, Union
+from tcod_ecs import World
 
 from roguelike.world.map.dungeon import generate_dungeon
 from roguelike.world.map.game_map import GameMap
+from roguelike.world.entity.factory import EntityFactory
+from roguelike.world.entity.systems import EntitySystem
 from roguelike.utils.logger import logger
 
 class Engine:
@@ -11,21 +14,25 @@ class Engine:
         logger.info("Initializing game engine")
         # 画面レイアウト
         self.screen_width = 80
-        self.screen_height = 50  # 標準的なサイズ
+        self.screen_height = 50
         
         # 各領域のサイズ
         self.map_width = 80
-        self.map_height = 43  # マップ領域
-        self.status_height = 1  # ステータス表示領域
-        self.message_height = 5  # メッセージ表示領域
+        self.map_height = 43
+        self.status_height = 1
+        self.message_height = 5
         
         # メッセージ管理
         self.messages = []
-        self.max_messages = 5  # 最大5件のメッセージを保持
+        self.max_messages = 5
         
-        # プレイヤーの位置
-        self.player_x = 0
-        self.player_y = 0
+        # ECS
+        self.world = World()
+        self.entity_factory = EntityFactory(self.world)
+        self.entity_system = EntitySystem(self.world)
+        
+        # プレイヤー
+        self.player_entity = None
         
         # マップ
         self.game_map = None
@@ -37,14 +44,14 @@ class Engine:
         # キー設定
         self.MOVE_KEYS = {
             # Vi keys
-            tcod.event.KeySym.h: (-1, 0),  # 左
-            tcod.event.KeySym.j: (0, 1),   # 下
-            tcod.event.KeySym.k: (0, -1),  # 上
-            tcod.event.KeySym.l: (1, 0),   # 右
-            tcod.event.KeySym.y: (-1, -1), # 左上
-            tcod.event.KeySym.u: (1, -1),  # 右上
-            tcod.event.KeySym.b: (-1, 1),  # 左下
-            tcod.event.KeySym.n: (1, 1),   # 右下
+            tcod.event.KeySym.h: (-1, 0),
+            tcod.event.KeySym.j: (0, 1),
+            tcod.event.KeySym.k: (0, -1),
+            tcod.event.KeySym.l: (1, 0),
+            tcod.event.KeySym.y: (-1, -1),
+            tcod.event.KeySym.u: (1, -1),
+            tcod.event.KeySym.b: (-1, 1),
+            tcod.event.KeySym.n: (1, 1),
             # Arrow keys
             tcod.event.KeySym.LEFT: (-1, 0),
             tcod.event.KeySym.RIGHT: (1, 0),
@@ -55,7 +62,7 @@ class Engine:
         self.ACTION_KEYS = {
             tcod.event.KeySym.ESCAPE: "quit",
         }
-    
+
     def initialize(self) -> None:
         """ゲームの初期化"""
         logger.info("Loading game assets")
@@ -66,7 +73,7 @@ class Engine:
             32, 8, tcod.tileset.CHARMAP_TCOD,
         )
         
-        # コンソールの初期化（C-orderに変更）
+        # コンソールの初期化
         self.console = tcod.console.Console(self.screen_width, self.screen_height, order="C")
         self.context = tcod.context.new(
             columns=self.console.width,
@@ -77,13 +84,16 @@ class Engine:
         
         logger.info("Generating dungeon")
         # ダンジョンの生成
-        self.game_map, (self.player_x, self.player_y) = generate_dungeon(
+        self.game_map, (player_x, player_y) = generate_dungeon(
             map_width=80,
             map_height=43,
             max_rooms=20,
             room_min_size=6,
             room_max_size=10,
         )
+        
+        # プレイヤーの作成
+        self.player_entity = self.entity_factory.create_player(player_x, player_y)
         
         # FOVの初期化
         self.visible = np.zeros((self.game_map.height, self.game_map.width), dtype=bool)
@@ -92,30 +102,40 @@ class Engine:
         self.add_message("Hello Stranger, welcome to the Dungeons of Doom!")
         self.add_message("Your quest is to retrieve the Amulet of Yendor.")
         self.add_message("Press '?' for help.")
-    
+
     def render(self) -> None:
         """画面の描画"""
         # FOVの再計算
         if self.fov_recompute:
-            self.visible = self.game_map.compute_fov(self.player_x, self.player_y)
+            player_pos = self.world.get_component(self.player_entity, Position)
+            self.visible = self.game_map.compute_fov(player_pos.x, player_pos.y)
             self.fov_recompute = False
         
         # コンソールをクリア
         self.console.clear()
         
-        # マップの描画（上部）
+        # マップの描画
         self.game_map.render(self.console, self.visible)
         
-        # プレイヤーの描画
-        self.console.ch[self.player_y, self.player_x] = ord("@")
-        self.console.fg[self.player_y, self.player_x] = (255, 255, 255)
+        # エンティティの描画
+        for entity, (pos,) in self.world.get_components((Position,)):
+            if not self.visible[pos.y, pos.x]:
+                continue
+                
+            render_data = self.entity_system.get_renderable_data(entity)
+            if render_data:
+                char, fg, bg = render_data
+                self.console.ch[pos.y, pos.x] = ord(char)
+                self.console.fg[pos.y, pos.x] = fg
+                self.console.bg[pos.y, pos.x] = bg
         
-        # ステータス情報の表示（枠なし）
+        # ステータス情報の表示
         status_y = self.map_height
-        status_text = f"HP: 100/100  Floor: 1  Turn: 0"
+        fighter = self.entity_system.get_fighter_data(self.player_entity)
+        status_text = f"HP: {fighter.hp}/{fighter.max_hp}  Floor: 1  Turn: 0"
         self.console.print(x=0, y=status_y, string=status_text, fg=(255, 255, 255))
         
-        # メッセージの表示（枠なし、最新5件）
+        # メッセージの表示
         message_y = status_y + self.status_height
         for i, message in enumerate(self.messages[-self.message_height:]):
             self.console.print(x=0, y=message_y + i, string=message, fg=(255, 255, 255))
@@ -141,16 +161,15 @@ class Engine:
             
             if isinstance(action, tuple):
                 dx, dy = action
-                new_x = self.player_x + dx
-                new_y = self.player_y + dy
+                player_pos = self.world.get_component(self.player_entity, Position)
+                new_x = player_pos.x + dx
+                new_y = player_pos.y + dy
                 
                 # 移動先が歩行可能な場合のみ移動
                 if 0 <= new_x < self.map_width and 0 <= new_y < self.map_height:
                     if self.game_map.walkable[new_y, new_x]:
-                        logger.debug(f"Player moving from ({self.player_x}, {self.player_y}) to ({new_x}, {new_y})")
-                        self.player_x = new_x
-                        self.player_y = new_y
-                        self.fov_recompute = True
+                        if self.entity_system.move_entity(self.player_entity, dx, dy):
+                            self.fov_recompute = True
                         
         return True
     
