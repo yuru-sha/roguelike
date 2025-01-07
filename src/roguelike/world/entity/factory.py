@@ -19,6 +19,7 @@ from roguelike.world.entity.item_functions import (
     cast_confusion,
     cast_paralyze,
     cast_berserk,
+    identify_item,
 )
 from roguelike.world.entity.inventory import InventorySystem
 
@@ -415,3 +416,27 @@ class EntityFactory:
         self.world.add_component(food, Stackable(count=count))
         
         return food 
+    
+    def create_identify_scroll(self, x: int, y: int) -> int:
+        """識別の巻物を作成"""
+        scroll = self.world.create_entity()
+        
+        self.world.add_component(scroll, Position(x=x, y=y))
+        self.world.add_component(scroll, Renderable(
+            char="?",
+            fg_color=(255, 255, 255),  # 白色
+            bg_color=(0, 0, 0)
+        ))
+        self.world.add_component(scroll, Name(name="Scroll of Identify"))
+        self.world.add_component(scroll, Item(
+            use_function=identify_item,
+            targeting=True,
+            targeting_message="Left-click an item to identify it",
+            weight=0.1,
+            value=50,
+            description="A magical scroll that reveals the true nature of items.",
+            identified=False,  # 未識別状態で開始
+            true_name="Scroll of Identify"  # 識別後の名前
+        ))
+        
+        return scroll 

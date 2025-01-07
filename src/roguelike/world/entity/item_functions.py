@@ -1,7 +1,7 @@
-from typing import Optional
+from typing import Any, Optional
 import esper
 
-from roguelike.world.entity.components import Fighter
+from roguelike.world.entity.components import Fighter, AI, AIType, Item, Name, ItemState
 from roguelike.utils.logger import logger
 
 def heal(world: esper.World, user: int, amount: int) -> bool:
@@ -92,4 +92,29 @@ def cast_berserk(world: esper.World, user: int, power_bonus: int, turns: int) ->
     
     # 効果時間後に元に戻すための処理は後で実装
     logger.info(f"You feel your power surge! (+{power_bonus} power)")
+    return True 
+
+def identify_item(world: Any, entity: int, target: Optional[int] = None) -> bool:
+    """アイテムを識別する"""
+    if target is None:
+        return False
+        
+    # 対象アイテムのコンポーネントを取得
+    if not world.has_component(target, Item):
+        return False
+        
+    item = world.component_for_entity(target, Item)
+    name = world.component_for_entity(target, Name)
+    
+    # すでに識別済みの場合は効果なし
+    if item.identified:
+        return False
+    
+    # アイテムを識別
+    item.identified = True
+    
+    # 本来の名前がある場合は変更
+    if item.true_name:
+        name.name = item.true_name
+    
     return True 

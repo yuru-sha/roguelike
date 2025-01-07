@@ -50,25 +50,36 @@ class InventoryScreen:
                 stack = self.engine.world.component_for_entity(item, Stackable)
                 details.append(f"x{stack.count}")
             
-            # 装備品の場合
-            if self.engine.world.has_component(item, Equipment):
-                equipment = self.engine.world.component_for_entity(item, Equipment)
-                if equipment.power_bonus != 0:
-                    details.append(f"Power +{equipment.power_bonus}")
-                if equipment.defense_bonus != 0:
-                    details.append(f"Defense +{equipment.defense_bonus}")
-                if equipment.is_equipped:
-                    details.append("(equipped)")
-            
-            # アイテムの基本情報を取得
+            # アイテムの状態を取得
             item_component = self.engine.world.component_for_entity(item, Item)
+            
+            # 未識別の場合は基本情報のみ表示
             if not item_component.identified:
                 details.append("(unidentified)")
             else:
+                # 装備品の場合
+                if self.engine.world.has_component(item, Equipment):
+                    equipment = self.engine.world.component_for_entity(item, Equipment)
+                    if equipment.power_bonus != 0:
+                        details.append(f"Power +{equipment.power_bonus}")
+                    if equipment.defense_bonus != 0:
+                        details.append(f"Defense +{equipment.defense_bonus}")
+                    if equipment.is_equipped:
+                        details.append("(equipped)")
+                
+                # 識別済みの場合は詳細情報を表示
                 if item_component.weight > 0:
                     details.append(f"{item_component.weight:.1f}kg")
                 if item_component.value > 0:
                     details.append(f"{item_component.value}G")
+                
+                # 祝福/呪いの状態を表示
+                if item_component.state != ItemState.NORMAL:
+                    state_text = {
+                        ItemState.BLESSED: "(blessed)",
+                        ItemState.CURSED: "(cursed)"
+                    }[item_component.state]
+                    details.append(state_text)
             
             # 詳細情報を結合
             detail_text = ", ".join(details)
