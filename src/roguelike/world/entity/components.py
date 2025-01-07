@@ -37,20 +37,33 @@ class AI:
 @dataclass
 class Item:
     """アイテムコンポーネント"""
-    weight: float = 0.0
-    value: int = 0
+    def __init__(self, use_function=None, targeting=False, targeting_message=None, **kwargs):
+        self.use_function = use_function  # アイテム使用時の効果
+        self.targeting = targeting  # ターゲット選択が必要か
+        self.targeting_message = targeting_message  # ターゲット選択時のメッセージ
+        self.function_kwargs = kwargs  # 効果関数に渡す追加パラメータ
 
 @dataclass
 class Inventory:
     """インベントリコンポーネント"""
-    capacity: int = 10  # 最大所持数
-    items: list = None
-
-    def __post_init__(self):
-        if self.items is None:
-            self.items = []
+    def __init__(self, capacity: int):
+        self.capacity = capacity
+        self.items = []  # 所持アイテムのリスト
 
 @dataclass
 class Name:
     """名前コンポーネント"""
     name: str 
+
+class Equipment:
+    """装備品コンポーネント"""
+    def __init__(self, slot: str, power_bonus=0, defense_bonus=0):
+        self.slot = slot  # 装備スロット（weapon/armor）
+        self.power_bonus = power_bonus  # 攻撃力ボーナス
+        self.defense_bonus = defense_bonus  # 防御力ボーナス
+        self.is_equipped = False  # 装備中かどうか
+
+class Equippable:
+    """装備可能コンポーネント"""
+    def __init__(self):
+        self.equipped_by = None  # 装備しているエンティティ 

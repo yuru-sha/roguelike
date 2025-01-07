@@ -8,8 +8,16 @@ from roguelike.world.map.game_map import GameMap
 from roguelike.world.entity.factory import EntityFactory
 from roguelike.world.entity.systems import EntitySystem
 from roguelike.world.entity.ai import AISystem
-from roguelike.world.entity.components import Position
+from roguelike.world.entity.components import (
+    Position,
+    Item,
+    Name,
+    Inventory,
+    Fighter,
+)
 from roguelike.utils.logger import logger
+from roguelike.world.entity.inventory import InventorySystem
+from roguelike.world.entity.item_functions import heal, cast_lightning, cast_fireball, cast_confusion
 
 class Engine:
     def __init__(self) -> None:
@@ -33,6 +41,7 @@ class Engine:
         self.entity_factory = EntityFactory(self.world)
         self.entity_system = EntitySystem(self.world)
         self.ai_system = AISystem(self.world, self.entity_system)
+        self.inventory_system = InventorySystem(self.world)
         
         # プレイヤー
         self.player_entity = None
@@ -45,7 +54,8 @@ class Engine:
         self.visible = None
         
         # キーム状態
-        self.game_state = "player_turn"  # "player_turn" or "enemy_turn"
+        self.game_state = "player_turn"  # "player_turn" or "enemy_turn" or "targeting"
+        self.targeting_item = None
         
         # キー設定
         self.MOVE_KEYS = {
@@ -67,6 +77,9 @@ class Engine:
         
         self.ACTION_KEYS = {
             tcod.event.KeySym.ESCAPE: "quit",
+            tcod.event.KeySym.g: "pickup",  # Get item
+            tcod.event.KeySym.i: "inventory",  # Show inventory
+            tcod.event.KeySym.d: "drop",  # Drop item
         }
 
     def initialize(self) -> None:
@@ -96,6 +109,7 @@ class Engine:
             max_rooms=20,
             room_min_size=6,
             room_max_size=10,
+            world=self.world,
         )
         
         # EntitySystemにゲームマップを設定
@@ -134,19 +148,46 @@ class Engine:
                 logger.info("Quit action triggered")
                 return False
             
-            if isinstance(action, tuple) and self.game_state == "player_turn":
-                dx, dy = action
-                player_pos = self.world.component_for_entity(self.player_entity, Position)
-                new_x = player_pos.x + dx
-                new_y = player_pos.y + dy
+            if self.game_state == "player_turn":
+                if isinstance(action, tuple):
+                    dx, dy = action
+                    player_pos = self.world.component_for_entity(self.player_entity, Position)
+                    new_x = player_pos.x + dx
+                    new_y = player_pos.y + dy
+                    
+                    # 移動先が歩行可能な場合のみ移動
+                    if 0 <= new_x < self.map_width and 0 <= new_y < self.map_height:
+                        if self.game_map.walkable[new_y, new_x]:
+                            if self.entity_system.move_entity(self.player_entity, dx, dy):
+                                self.fov_recompute = True
+                                self.game_state = "enemy_turn"
                 
-                # 移動先が歩行可能な場合のみ移動
-                if 0 <= new_x < self.map_width and 0 <= new_y < self.map_height:
-                    if self.game_map.walkable[new_y, new_x]:
-                        if self.entity_system.move_entity(self.player_entity, dx, dy):
-                            self.fov_recompute = True
-                            self.game_state = "enemy_turn"
-                        
+                elif action == "pickup":
+                    # プレイヤーの位置にあるアイテムを拾う
+                    player_pos = self.world.component_for_entity(self.player_entity, Position)
+                    items = []
+                    for ent in self.entity_system.get_entities_at(player_pos.x, player_pos.y):
+                        if self.world.has_component(ent, Item):
+                            items.append(ent)
+                    
+                    if not items:
+                        self.add_message("There is nothing here to pick up.")
+                        continue
+                    
+                    item = items[0]  # 最初のアイテムを拾う
+                    if self.inventory_system.add_item(self.player_entity, item):
+                        name = self.world.component_for_entity(item, Name)
+                        self.add_message(f"You pick up the {name.name}!")
+                        self.game_state = "enemy_turn"
+                
+                elif action == "inventory":
+                    # インベントリを表示（実装は後で）
+                    self.show_inventory()
+                
+                elif action == "drop":
+                    # アイテムを捨てる（実装は後で）
+                    self.show_inventory(drop=True)
+        
         return True
     
     def handle_action(self, event) -> Optional[Union[str, Tuple[int, int]]]:
@@ -166,8 +207,8 @@ class Engine:
         if key in self.MOVE_KEYS:
             return self.MOVE_KEYS[key]
         
-        if key == tcod.event.KeySym.ESCAPE:
-            return "quit"
+        if key in self.ACTION_KEYS:
+            return self.ACTION_KEYS[key]
         
         return None
     
@@ -222,3 +263,34 @@ class Engine:
         
         # 画面の更新
         self.context.present(self.console) 
+    
+    def show_inventory(self, drop: bool = False) -> None:
+        """インベントリを表示"""
+        if not self.world.has_component(self.player_entity, Inventory):
+            return
+            
+        inventory = self.world.component_for_entity(self.player_entity, Inventory)
+        
+        if not inventory.items:
+            self.add_message("Your inventory is empty.")
+            return
+            
+        # インベントリの表示（実装は後で）
+        # 今は最初のアイテムを使用/ドロップする
+        item = inventory.items[0]
+        
+        if drop:
+            if self.inventory_system.remove_item(self.player_entity, item):
+                player_pos = self.world.component_for_entity(self.player_entity, Position)
+                # アイテムをプレイヤーの位置に戻す
+                self.world.add_component(item, Position(x=player_pos.x, y=player_pos.y))
+                self.game_state = "enemy_turn"
+        else:
+            item_component = self.world.component_for_entity(item, Item)
+            if item_component.targeting:
+                self.targeting_item = item
+                self.game_state = "targeting"
+                self.add_message(item_component.targeting_message or "Left-click a target tile.")
+            else:
+                if self.inventory_system.use_item(self.player_entity, item):
+                    self.game_state = "enemy_turn" 
