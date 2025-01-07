@@ -44,14 +44,38 @@ class Stackable:
         self.max_count = max_count  # 最大重ね置き数
 
 @dataclass
+class ItemDetails:
+    """アイテムの詳細情報コンポーネント"""
+    def __init__(self, description: str = "", weight: float = 0.0, value: int = 0, identified: bool = False):
+        self.description = description  # アイテムの説明文
+        self.weight = weight  # 重量（kg）
+        self.value = value  # 価値（ゴールド）
+        self.identified = identified  # 識別状態
+        self.true_name = None  # 識別後の本当の名前（未識別の場合のみ使用）
+
+class ItemState(Enum):
+    """アイテムの状態"""
+    NORMAL = auto()  # 通常
+    BLESSED = auto()  # 祝福
+    CURSED = auto()  # 呪い
+
+@dataclass
 class Item:
     """アイテムコンポーネント"""
-    def __init__(self, use_function=None, targeting=False, targeting_message=None, stackable=False, **kwargs):
+    def __init__(self, use_function=None, targeting=False, targeting_message=None, stackable=False, 
+                 weight: float = 0.0, value: int = 0, description: str = "", identified: bool = True,
+                 state: ItemState = ItemState.NORMAL, true_name: Optional[str] = None, **kwargs):
         self.use_function = use_function  # アイテム使用時の効果
         self.targeting = targeting  # ターゲット選択が必要か
         self.targeting_message = targeting_message  # ターゲット選択時のメッセージ
         self.function_kwargs = kwargs  # 効果関数に渡す追加パラメータ
         self.stackable = stackable  # 重ね置き可能か
+        self.weight = weight  # 重量（kg）
+        self.value = value  # 価値（ゴールド）
+        self.description = description  # アイテムの説明文
+        self.identified = identified  # 識別状態
+        self.state = state  # アイテムの状態（通常/祝福/呪い）
+        self.true_name = true_name  # 識別後の本当の名前（未識別の場合のみ使用）
 
 @dataclass
 class Inventory:
