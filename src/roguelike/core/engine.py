@@ -15,6 +15,8 @@ from roguelike.world.entity.components import (
     Inventory,
     Fighter,
     Equipment,
+    Stackable,
+    Renderable,
 )
 from roguelike.utils.logger import logger
 from roguelike.world.entity.inventory import InventorySystem
@@ -200,7 +202,7 @@ class Engine:
                         self.add_message("There is nothing here to pick up.")
                         continue
                     
-                    item = items[0]  # 最初のアイテムを拾う
+                    item = items[-1]  # 最後のアイテム（一番上にあるもの）を拾う
                     if self.inventory_system.add_item(self.player_entity, item):
                         name = self.world.component_for_entity(item, Name)
                         self.add_message(f"You pick up the {name.name}!")
@@ -326,6 +328,12 @@ class Engine:
             # アイテムの詳細情報を取得
             details = []
             
+            # 重ね置き可能なアイテムの場合は個数を表示
+            if (self.world.has_component(item, Item) and 
+                self.world.component_for_entity(item, Item).stackable):
+                stack = self.world.component_for_entity(item, Stackable)
+                details.append(f"x{stack.count}")
+            
             # 装備品の場合
             if self.world.has_component(item, Equipment):
                 equipment = self.world.component_for_entity(item, Equipment)
@@ -386,9 +394,43 @@ class Engine:
                     if drop:
                         if self.inventory_system.remove_item(self.player_entity, selected_item):
                             player_pos = self.world.component_for_entity(self.player_entity, Position)
-                            # アイテムをプレイヤーの位置に戻す
-                            self.world.add_component(selected_item, Position(x=player_pos.x, y=player_pos.y))
+                            
+                            # アイテムの情報を取得
                             name = self.world.component_for_entity(selected_item, Name)
+                            item_data = {}
+                            
+                            # 各コンポーネントの情報をコピー
+                            if self.world.has_component(selected_item, Item):
+                                item = self.world.component_for_entity(selected_item, Item)
+                                item_data['item'] = item
+                            
+                            if self.world.has_component(selected_item, Equipment):
+                                equipment = self.world.component_for_entity(selected_item, Equipment)
+                                item_data['equipment'] = equipment
+                            
+                            if self.world.has_component(selected_item, Stackable):
+                                stackable = self.world.component_for_entity(selected_item, Stackable)
+                                item_data['stackable'] = stackable
+                            
+                            renderable = self.world.component_for_entity(selected_item, Renderable)
+                            
+                            # 古いアイテムを削除
+                            self.world.delete_entity(selected_item)
+                            
+                            # 新しいアイテムを作成
+                            new_item = self.world.create_entity()
+                            self.world.add_component(new_item, Position(x=player_pos.x, y=player_pos.y))
+                            self.world.add_component(new_item, renderable)
+                            self.world.add_component(new_item, Name(name=name.name))
+                            
+                            # 保存しておいたコンポーネントを追加
+                            if 'item' in item_data:
+                                self.world.add_component(new_item, item_data['item'])
+                            if 'equipment' in item_data:
+                                self.world.add_component(new_item, item_data['equipment'])
+                            if 'stackable' in item_data:
+                                self.world.add_component(new_item, item_data['stackable'])
+                            
                             self.add_message(f"You dropped the {name.name}.")
                             self.game_state = "enemy_turn"
                     else:

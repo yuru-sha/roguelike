@@ -37,13 +37,21 @@ class AI:
     turns_remaining: Optional[int] = None  # 特殊状態の残りターン数（Noneは無制限）
 
 @dataclass
+class Stackable:
+    """重ね置き可能なアイテムのコンポーネント"""
+    def __init__(self, count: int = 1, max_count: int = 99):
+        self.count = count  # 現在の個数
+        self.max_count = max_count  # 最大重ね置き数
+
+@dataclass
 class Item:
     """アイテムコンポーネント"""
-    def __init__(self, use_function=None, targeting=False, targeting_message=None, **kwargs):
+    def __init__(self, use_function=None, targeting=False, targeting_message=None, stackable=False, **kwargs):
         self.use_function = use_function  # アイテム使用時の効果
         self.targeting = targeting  # ターゲット選択が必要か
         self.targeting_message = targeting_message  # ターゲット選択時のメッセージ
         self.function_kwargs = kwargs  # 効果関数に渡す追加パラメータ
+        self.stackable = stackable  # 重ね置き可能か
 
 @dataclass
 class Inventory:

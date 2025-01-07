@@ -56,12 +56,13 @@ class EntitySystem:
         return True
     
     def get_entities_at(self, x: int, y: int) -> List[int]:
-        """指定位置にいるすべてのエンティティを取得"""
+        """指定座標にあるエンティティのリストを返す"""
         entities = []
         for ent, (pos,) in self.world.get_components(Position):
             if pos.x == x and pos.y == y:
                 entities.append(ent)
-        return entities
+        # エンティティIDの小さい順（生成順）にソート
+        return sorted(entities)
     
     def get_renderable_data(self, entity: int) -> Optional[Tuple[str, Tuple[int, int, int], Tuple[int, int, int]]]:
         """エンティティの描画データを取得"""

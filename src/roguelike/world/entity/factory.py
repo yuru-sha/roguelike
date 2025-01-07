@@ -10,8 +10,16 @@ from roguelike.world.entity.components import (
     Inventory,
     Name,
     Equipment,
+    Stackable,
 )
-from roguelike.world.entity.item_functions import heal, cast_lightning, cast_fireball, cast_confusion
+from roguelike.world.entity.item_functions import (
+    heal,
+    cast_lightning,
+    cast_fireball,
+    cast_confusion,
+    cast_paralyze,
+    cast_berserk,
+)
 
 class EntityFactory:
     """エンティティの生成を管理するファクトリクラス"""
@@ -99,7 +107,7 @@ class EntityFactory:
         
         return self.world.create_entity(*components)
     
-    def create_healing_potion(self, x: int, y: int) -> int:
+    def create_healing_potion(self, x: int, y: int, count: int = 1) -> int:
         """回復ポーションを作成"""
         potion = self.world.create_entity()
         
@@ -113,12 +121,14 @@ class EntityFactory:
         self.world.add_component(potion, Item(
             use_function=heal,
             targeting=False,
+            stackable=True,
             amount=4
         ))
+        self.world.add_component(potion, Stackable(count=count))
         
         return potion
     
-    def create_lightning_scroll(self, x: int, y: int) -> int:
+    def create_lightning_scroll(self, x: int, y: int, count: int = 1) -> int:
         """雷の巻物を作成"""
         scroll = self.world.create_entity()
         
@@ -132,9 +142,11 @@ class EntityFactory:
         self.world.add_component(scroll, Item(
             use_function=cast_lightning,
             targeting=True,
+            stackable=True,
             targeting_message="Left-click an enemy to strike it with lightning",
             damage=20
         ))
+        self.world.add_component(scroll, Stackable(count=count))
         
         return scroll
     
@@ -176,7 +188,7 @@ class EntityFactory:
         
         return shield 
     
-    def create_fireball_scroll(self, x: int, y: int) -> int:
+    def create_fireball_scroll(self, x: int, y: int, count: int = 1) -> int:
         """ファイアーボールの巻物を作成"""
         scroll = self.world.create_entity()
         
@@ -190,10 +202,12 @@ class EntityFactory:
         self.world.add_component(scroll, Item(
             use_function=cast_fireball,
             targeting=True,
+            stackable=True,
             targeting_message="Left-click a target tile to cast fireball",
             damage=12,
             radius=3
         ))
+        self.world.add_component(scroll, Stackable(count=count))
         
         return scroll
     
