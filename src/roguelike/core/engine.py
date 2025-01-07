@@ -140,6 +140,28 @@ class Engine:
     def handle_events(self) -> bool:
         """イベント処理"""
         for event in tcod.event.wait():
+            # ターゲット選択中のマウスクリック
+            if self.game_state == "targeting" and isinstance(event, tcod.event.MouseButtonDown):
+                if event.button == tcod.event.MouseButton.LEFT:
+                    x, y = event.tile
+                    # マップ内かつ視界内の場合のみ
+                    if (0 <= x < self.map_width and 0 <= y < self.map_height and 
+                        self.visible[y, x]):
+                        # ターゲット位置のエンティティを取得
+                        target = None
+                        for ent in self.entity_system.get_entities_at(x, y):
+                            if self.world.has_component(ent, Fighter):
+                                target = ent
+                                break
+                        
+                        if target is not None:
+                            self.inventory_system.use_item(self.player_entity, self.targeting_item, target)
+                            self.game_state = "enemy_turn"
+                    
+                    self.targeting_item = None
+                    self.game_state = "player_turn"
+                    continue
+            
             action = self.handle_action(event)
             
             if action is None:
@@ -182,11 +204,9 @@ class Engine:
                         self.game_state = "enemy_turn"
                 
                 elif action == "inventory":
-                    # インベントリを表示（実装は後で）
                     self.show_inventory()
                 
                 elif action == "drop":
-                    # アイテムを捨てる（実装は後で）
                     self.show_inventory(drop=True)
         
         return True
