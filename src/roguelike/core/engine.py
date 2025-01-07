@@ -277,7 +277,7 @@ class Engine:
             return
         
         # インベントリウィンドウの設定
-        window_width = 30
+        window_width = 50  # 詳細情報を表示するために幅を広げる
         window_height = len(inventory.items) + 2
         window_x = self.screen_width // 2 - window_width // 2
         window_y = self.screen_height // 2 - window_height // 2
@@ -300,13 +300,31 @@ class Engine:
             name = self.world.component_for_entity(item, Name)
             key = chr(ord('a') + i)  # a, b, c, ...
             
-            # 装備品の場合は装備状態を表示
+            # アイテムの詳細情報を取得
+            details = []
+            
+            # 装備品の場合
             if self.world.has_component(item, Equipment):
                 equipment = self.world.component_for_entity(item, Equipment)
+                if equipment.power_bonus != 0:
+                    details.append(f"Power +{equipment.power_bonus}")
+                if equipment.defense_bonus != 0:
+                    details.append(f"Defense +{equipment.defense_bonus}")
                 if equipment.is_equipped:
-                    text = f"{key}) {name.name} (equipped)"
-                else:
-                    text = f"{key}) {name.name}"
+                    details.append("(equipped)")
+            
+            # 使用可能アイテムの場合
+            if self.world.has_component(item, Item):
+                item_component = self.world.component_for_entity(item, Item)
+                if "amount" in item_component.function_kwargs:
+                    details.append(f"Heals {item_component.function_kwargs['amount']} HP")
+                elif "damage" in item_component.function_kwargs:
+                    details.append(f"Deals {item_component.function_kwargs['damage']} damage")
+            
+            # 詳細情報を結合
+            detail_text = ", ".join(details)
+            if detail_text:
+                text = f"{key}) {name.name:<15} - {detail_text}"
             else:
                 text = f"{key}) {name.name}"
             
