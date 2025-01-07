@@ -145,7 +145,11 @@ class EntityFactory:
             use_function=heal,
             targeting=False,
             stackable=True,
-            amount=4
+            amount=4,
+            weight=0.2,
+            value=20,
+            description="A magical potion that restores 4 HP when consumed.",
+            identified=False  # 未識別状態で開始
         ))
         self.world.add_component(potion, Stackable(count=count))
         
@@ -305,7 +309,11 @@ class EntityFactory:
             bg_color=(0, 0, 0)
         ))
         self.world.add_component(dagger, Name(name="Dagger"))
-        self.world.add_component(dagger, Item())
+        self.world.add_component(dagger, Item(
+            weight=0.5,
+            value=10,
+            description="A small but sharp dagger. Easy to handle and quick to strike."
+        ))
         self.world.add_component(dagger, Equipment(
             slot="weapon",
             power_bonus=1,
@@ -325,7 +333,11 @@ class EntityFactory:
             bg_color=(0, 0, 0)
         ))
         self.world.add_component(armor, Name(name="Leather Armor"))
-        self.world.add_component(armor, Item())
+        self.world.add_component(armor, Item(
+            weight=3.0,
+            value=25,
+            description="Light armor made of hardened leather. Offers basic protection without hindering movement."
+        ))
         self.world.add_component(armor, Equipment(
             slot="armor",
             power_bonus=1,
@@ -345,7 +357,11 @@ class EntityFactory:
             bg_color=(0, 0, 0)
         ))
         self.world.add_component(bow, Name(name="Bow"))
-        self.world.add_component(bow, Item())
+        self.world.add_component(bow, Item(
+            weight=1.0,
+            value=30,
+            description="A wooden shortbow. Effective for ranged combat when used with arrows."
+        ))
         self.world.add_component(bow, Equipment(
             slot="ranged",
             power_bonus=1
@@ -364,7 +380,12 @@ class EntityFactory:
             bg_color=(0, 0, 0)
         ))
         self.world.add_component(arrows, Name(name="Arrows"))
-        self.world.add_component(arrows, Item(stackable=True))
+        self.world.add_component(arrows, Item(
+            stackable=True,
+            weight=0.1,
+            value=1,
+            description="Sharp arrows for use with a bow. Each arrow is carefully fletched for accuracy."
+        ))
         self.world.add_component(arrows, Stackable(count=count))
         self.world.add_component(arrows, Equipment(
             slot="ammo",
@@ -386,7 +407,10 @@ class EntityFactory:
         self.world.add_component(food, Name(name="Food Ration"))
         self.world.add_component(food, Item(
             use_function=lambda world, entity, **kwargs: True,  # 仮の実装
-            stackable=True
+            stackable=True,
+            weight=0.5,
+            value=5,
+            description="A preserved food ration. Not particularly tasty, but will keep you going."
         ))
         self.world.add_component(food, Stackable(count=count))
         
