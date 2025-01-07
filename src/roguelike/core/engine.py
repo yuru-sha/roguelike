@@ -41,10 +41,10 @@ class Engine:
         
         # ECS
         self.world = esper.World()
-        self.entity_factory = EntityFactory(self.world)
+        self.entity_factory = EntityFactory(self.world, self)
         self.entity_system = EntitySystem(self.world)
         self.ai_system = AISystem(self.world, self.entity_system)
-        self.inventory_system = InventorySystem(self.world)
+        self.inventory_system = InventorySystem(self.world, self)
         
         # プレイヤー
         self.player_entity = None
@@ -83,6 +83,7 @@ class Engine:
             tcod.event.KeySym.g: "pickup",  # Get item
             tcod.event.KeySym.i: "inventory",  # Show inventory
             tcod.event.KeySym.d: "drop",  # Drop item
+            tcod.event.KeySym.s: "split",  # Split item
         }
 
     def initialize(self) -> None:
@@ -91,7 +92,7 @@ class Engine:
         
         # フォントの設定
         tileset = tcod.tileset.load_tilesheet(
-            "src/roguelike/assets/dejavu10x10_gs_tc.png",
+            "roguelike/assets/dejavu10x10_gs_tc.png",
             32, 8, tcod.tileset.CHARMAP_TCOD,
         )
         
@@ -213,6 +214,9 @@ class Engine:
                 
                 elif action == "drop":
                     self.show_inventory(drop=True)
+                    
+                elif action == "split":
+                    self.show_inventory(split=True)
         
         return True
     
@@ -264,8 +268,11 @@ class Engine:
         # マップの描画
         self.game_map.render(self.console, self.visible)
         
-        # エンティティの描画
+        # プレイヤー以外のエンティティを描画
         for ent, (pos,) in self.world.get_components(Position):
+            if ent == self.player_entity:  # プレイヤーはスキップ
+                continue
+                
             if not self.visible[pos.y, pos.x]:
                 continue
                 
@@ -275,6 +282,15 @@ class Engine:
                 self.console.ch[pos.y, pos.x] = ord(char)
                 self.console.fg[pos.y, pos.x] = fg
                 self.console.bg[pos.y, pos.x] = bg
+        
+        # プレイヤーを最後に描画
+        player_pos = self.world.component_for_entity(self.player_entity, Position)
+        render_data = self.entity_system.get_renderable_data(self.player_entity)
+        if render_data:
+            char, fg, bg = render_data
+            self.console.ch[player_pos.y, player_pos.x] = ord(char)
+            self.console.fg[player_pos.y, player_pos.x] = fg
+            self.console.bg[player_pos.y, player_pos.x] = bg
         
         # ステータス情報の表示
         status_y = self.map_height
@@ -290,7 +306,7 @@ class Engine:
         # 画面の更新
         self.context.present(self.console) 
     
-    def show_inventory(self, drop: bool = False) -> None:
+    def show_inventory(self, drop: bool = False, split: bool = False) -> None:
         """インベントリを表示"""
         if not self.world.has_component(self.player_entity, Inventory):
             return
@@ -302,83 +318,99 @@ class Engine:
             return
         
         # インベントリウィンドウの設定
-        window_width = 50  # 詳細情報を表示するために幅を広げる
+        window_width = 50
         window_height = len(inventory.items) + 2
         window_x = self.screen_width // 2 - window_width // 2
         window_y = self.screen_height // 2 - window_height // 2
         
-        # ウィンドウの描画
-        window = tcod.console.Console(window_width, window_height, order="F")
-        window.draw_frame(
-            x=0,
-            y=0,
-            width=window_width,
-            height=window_height,
-            title="Inventory",
-            clear=True,
-            fg=(255, 255, 255),
-            bg=(0, 0, 0),
-        )
+        # 選択中のアイテムインデックス
+        selected_index = 0
         
-        # アイテム一覧の表示
-        for i, item in enumerate(inventory.items):
-            name = self.world.component_for_entity(item, Name)
-            key = chr(ord('a') + i)  # a, b, c, ...
-            
-            # アイテムの詳細情報を取得
-            details = []
-            
-            # 重ね置き可能なアイテムの場合は個数を表示
-            if (self.world.has_component(item, Item) and 
-                self.world.component_for_entity(item, Item).stackable):
-                stack = self.world.component_for_entity(item, Stackable)
-                details.append(f"x{stack.count}")
-            
-            # 装備品の場合
-            if self.world.has_component(item, Equipment):
-                equipment = self.world.component_for_entity(item, Equipment)
-                if equipment.power_bonus != 0:
-                    details.append(f"Power +{equipment.power_bonus}")
-                if equipment.defense_bonus != 0:
-                    details.append(f"Defense +{equipment.defense_bonus}")
-                if equipment.is_equipped:
-                    details.append("(equipped)")
-            
-            # 使用可能アイテムの場合
-            if self.world.has_component(item, Item):
-                item_component = self.world.component_for_entity(item, Item)
-                if "amount" in item_component.function_kwargs:
-                    details.append(f"Heals {item_component.function_kwargs['amount']} HP")
-                elif "damage" in item_component.function_kwargs:
-                    details.append(f"Deals {item_component.function_kwargs['damage']} damage")
-            
-            # 詳細情報を結合
-            detail_text = ", ".join(details)
-            if detail_text:
-                text = f"{key}) {name.name:<15} - {detail_text}"
-            else:
-                text = f"{key}) {name.name}"
-            
-            window.print(x=1, y=i+1, string=text)
-        
-        # メインコンソールにウィンドウを合成
-        window.blit(
-            dest=self.console,
-            dest_x=window_x,
-            dest_y=window_y,
-            src_x=0,
-            src_y=0,
-            width=window_width,
-            height=window_height,
-            fg_alpha=1.0,
-            bg_alpha=0.7,
-        )
-        
-        # 画面の更新
-        self.context.present(self.console)
-        
-        # キー入力待ち
         while True:
+            # ウィンドウの描画
+            window = tcod.console.Console(window_width, window_height, order="F")
+            window.draw_frame(
+                x=0,
+                y=0,
+                width=window_width,
+                height=window_height,
+                title="Inventory",
+                clear=True,
+                fg=(255, 255, 255),
+                bg=(0, 0, 0),
+            )
+            
+            # アイテム一覧の表示
+            for i, item in enumerate(inventory.items):
+                name = self.world.component_for_entity(item, Name)
+                key = chr(ord('a') + i)
+                
+                # アイテムの詳細情報を取得
+                details = []
+                
+                # 重ね置き可能なアイテムの場合は個数を表示
+                is_stackable = False
+                if (self.world.has_component(item, Item) and 
+                    self.world.component_for_entity(item, Item).stackable):
+                    stack = self.world.component_for_entity(item, Stackable)
+                    details.append(f"x{stack.count}")
+                    is_stackable = True
+                
+                # 装備品の場合
+                if self.world.has_component(item, Equipment):
+                    equipment = self.world.component_for_entity(item, Equipment)
+                    if equipment.power_bonus != 0:
+                        details.append(f"Power +{equipment.power_bonus}")
+                    if equipment.defense_bonus != 0:
+                        details.append(f"Defense +{equipment.defense_bonus}")
+                    if equipment.is_equipped:
+                        details.append("(equipped)")
+                
+                # 使用可能アイテムの場合
+                if self.world.has_component(item, Item):
+                    item_component = self.world.component_for_entity(item, Item)
+                    if "amount" in item_component.function_kwargs:
+                        details.append(f"Heals {item_component.function_kwargs['amount']} HP")
+                    elif "damage" in item_component.function_kwargs:
+                        details.append(f"Deals {item_component.function_kwargs['damage']} damage")
+                
+                # 詳細情報を結合
+                detail_text = ", ".join(details)
+                if detail_text:
+                    text = f"{key}) {name.name:<15} - {detail_text}"
+                else:
+                    text = f"{key}) {name.name}"
+                
+                # 選択中のアイテムは強調表示
+                # 分割モードでは、スタック可能なアイテムのみ強調表示
+                if split and not is_stackable:
+                    color = (64, 64, 64)  # 分割不可能なアイテムは暗く表示
+                else:
+                    color = (255, 255, 255) if i == selected_index else (128, 128, 128)
+                window.print(x=1, y=i+1, string=text, fg=color)
+            
+            # 操作説明を表示
+            action = "drop" if drop else "split" if split else "use"
+            help_text = f"↑↓: Select  Enter: {action.capitalize()}  Esc: Cancel"
+            window.print(x=1, y=window_height-1, string=help_text)
+            
+            # メインコンソールにウィンドウを合成
+            window.blit(
+                dest=self.console,
+                dest_x=window_x,
+                dest_y=window_y,
+                src_x=0,
+                src_y=0,
+                width=window_width,
+                height=window_height,
+                fg_alpha=1.0,
+                bg_alpha=0.7,
+            )
+            
+            # 画面の更新
+            self.context.present(self.console)
+            
+            # キー入力待ち
             for event in tcod.event.wait():
                 if not isinstance(event, tcod.event.KeyDown):
                     continue
@@ -387,52 +419,74 @@ class Engine:
                 if event.sym == tcod.event.KeySym.ESCAPE:
                     return
                 
-                # アイテムの選択（a-z）
-                index = event.sym - tcod.event.KeySym.a
-                if 0 <= index < len(inventory.items):
-                    selected_item = inventory.items[index]
-                    if drop:
-                        if self.inventory_system.remove_item(self.player_entity, selected_item):
-                            player_pos = self.world.component_for_entity(self.player_entity, Position)
-                            
-                            # アイテムの情報を取得
-                            name = self.world.component_for_entity(selected_item, Name)
-                            item_data = {}
-                            
-                            # 各コンポーネントの情報をコピー
-                            if self.world.has_component(selected_item, Item):
-                                item = self.world.component_for_entity(selected_item, Item)
-                                item_data['item'] = item
-                            
-                            if self.world.has_component(selected_item, Equipment):
-                                equipment = self.world.component_for_entity(selected_item, Equipment)
-                                item_data['equipment'] = equipment
-                            
-                            if self.world.has_component(selected_item, Stackable):
-                                stackable = self.world.component_for_entity(selected_item, Stackable)
-                                item_data['stackable'] = stackable
-                            
-                            renderable = self.world.component_for_entity(selected_item, Renderable)
-                            
-                            # 古いアイテムを削除
-                            self.world.delete_entity(selected_item)
-                            
-                            # 新しいアイテムを作成
-                            new_item = self.world.create_entity()
-                            self.world.add_component(new_item, Position(x=player_pos.x, y=player_pos.y))
-                            self.world.add_component(new_item, renderable)
-                            self.world.add_component(new_item, Name(name=name.name))
-                            
-                            # 保存しておいたコンポーネントを追加
-                            if 'item' in item_data:
-                                self.world.add_component(new_item, item_data['item'])
-                            if 'equipment' in item_data:
-                                self.world.add_component(new_item, item_data['equipment'])
-                            if 'stackable' in item_data:
-                                self.world.add_component(new_item, item_data['stackable'])
-                            
-                            self.add_message(f"You dropped the {name.name}.")
-                            self.game_state = "enemy_turn"
+                # 上下キーで選択移動
+                elif event.sym == tcod.event.KeySym.UP:
+                    selected_index = (selected_index - 1) % len(inventory.items)
+                    break
+                elif event.sym == tcod.event.KeySym.DOWN:
+                    selected_index = (selected_index + 1) % len(inventory.items)
+                    break
+                
+                # Enterキーでアイテム使用/ドロップ/分割
+                elif event.sym == tcod.event.KeySym.RETURN:
+                    selected_item = inventory.items[selected_index]
+                    
+                    # 分割モードの場合
+                    if split:
+                        if (self.world.has_component(selected_item, Item) and 
+                            self.world.component_for_entity(selected_item, Item).stackable):
+                            stack = self.world.component_for_entity(selected_item, Stackable)
+                            name = self.world.component_for_entity(selected_item, Name).name
+                            if stack.count > 1:
+                                # 数量選択画面を表示
+                                quantity = self.show_quantity_selector(
+                                    title="Split Stack",
+                                    max_quantity=stack.count - 1
+                                )
+                                if quantity:
+                                    self.inventory_system.split_item(
+                                        self.player_entity,
+                                        selected_item,
+                                        quantity
+                                    )
+                                    self.add_message(f"You split off {quantity} {name}s.")
+                                    self.game_state = "enemy_turn"
+                    # ドロップモードの場合
+                    elif drop:
+                        if (self.world.has_component(selected_item, Item) and 
+                            self.world.component_for_entity(selected_item, Item).stackable):
+                            stack = self.world.component_for_entity(selected_item, Stackable)
+                            name = self.world.component_for_entity(selected_item, Name).name
+                            if stack.count > 1:
+                                # 数量選択画面を表示
+                                quantity = self.show_quantity_selector(
+                                    title="Drop How Many?",
+                                    max_quantity=stack.count
+                                )
+                                if quantity:
+                                    new_item = self.inventory_system.remove_item(self.player_entity, selected_item, quantity)
+                                    if new_item:
+                                        # ドロップしたアイテムをプレイヤーの位置に配置
+                                        player_pos = self.world.component_for_entity(self.player_entity, Position)
+                                        self.world.add_component(new_item, Position(x=player_pos.x, y=player_pos.y))
+                                        self.add_message(f"You drop {quantity} {name}s.")
+                                        self.game_state = "enemy_turn"
+                            else:
+                                if self.inventory_system.remove_item(self.player_entity, selected_item):
+                                    # ドロップしたアイテムをプレイヤーの位置に配置
+                                    player_pos = self.world.component_for_entity(self.player_entity, Position)
+                                    self.world.add_component(selected_item, Position(x=player_pos.x, y=player_pos.y))
+                                    self.add_message(f"You drop {name}.")
+                                    self.game_state = "enemy_turn"
+                        else:
+                            name = self.world.component_for_entity(selected_item, Name).name
+                            if self.inventory_system.remove_item(self.player_entity, selected_item):
+                                # ドロップしたアイテムをプレイヤーの位置に配置
+                                player_pos = self.world.component_for_entity(self.player_entity, Position)
+                                self.world.add_component(selected_item, Position(x=player_pos.x, y=player_pos.y))
+                                self.add_message(f"You drop {name}.")
+                                self.game_state = "enemy_turn"
+                    # 使用モードの場合
                     else:
                         item_component = self.world.component_for_entity(selected_item, Item)
                         if item_component.targeting:
@@ -440,6 +494,88 @@ class Engine:
                             self.game_state = "targeting"
                             self.add_message(item_component.targeting_message or "Left-click a target tile.")
                         else:
-                            if self.inventory_system.use_item(self.player_entity, selected_item):
-                                self.game_state = "enemy_turn"
+                            if (item_component.stackable and 
+                                self.world.component_for_entity(selected_item, Stackable).count > 1):
+                                # 数量選択画面を表示
+                                quantity = self.show_quantity_selector(
+                                    title="Use How Many?",
+                                    max_quantity=self.world.component_for_entity(selected_item, Stackable).count
+                                )
+                                if quantity:
+                                    for _ in range(quantity):
+                                        if not self.inventory_system.use_item(self.player_entity, selected_item):
+                                            break
+                            else:
+                                if self.inventory_system.use_item(self.player_entity, selected_item):
+                                    self.game_state = "enemy_turn"
                     return 
+    
+    def show_quantity_selector(self, title: str, max_quantity: int) -> Optional[int]:
+        """数量選択画面を表示"""
+        window_width = 30
+        window_height = 5
+        window_x = self.screen_width // 2 - window_width // 2
+        window_y = self.screen_height // 2 - window_height // 2
+        
+        current_quantity = 1
+        
+        while True:
+            # ウィンドウの描画
+            window = tcod.console.Console(window_width, window_height, order="F")
+            window.draw_frame(
+                x=0,
+                y=0,
+                width=window_width,
+                height=window_height,
+                title=title,
+                clear=True,
+                fg=(255, 255, 255),
+                bg=(0, 0, 0),
+            )
+            
+            # 数量表示
+            quantity_text = f"Quantity: {current_quantity}"
+            x = window_width // 2 - len(quantity_text) // 2
+            window.print(x=x, y=1, string=quantity_text)
+            
+            # 操作説明
+            help_text = "↑↓: Adjust  Enter: OK  Esc: Cancel"
+            x = window_width // 2 - len(help_text) // 2
+            window.print(x=x, y=3, string=help_text)
+            
+            # メインコンソールにウィンドウを合成
+            window.blit(
+                dest=self.console,
+                dest_x=window_x,
+                dest_y=window_y,
+                src_x=0,
+                src_y=0,
+                width=window_width,
+                height=window_height,
+                fg_alpha=1.0,
+                bg_alpha=0.7,
+            )
+            
+            # 画面の更新
+            self.context.present(self.console)
+            
+            # キー入力待ち
+            for event in tcod.event.wait():
+                if not isinstance(event, tcod.event.KeyDown):
+                    continue
+                    
+                # ESCキーでキャンセル
+                if event.sym == tcod.event.KeySym.ESCAPE:
+                    return None
+                
+                # 上下キーで数量調整
+                elif event.sym == tcod.event.KeySym.UP:
+                    current_quantity = min(current_quantity + 1, max_quantity)
+                    break
+                elif event.sym == tcod.event.KeySym.DOWN:
+                    current_quantity = max(current_quantity - 1, 1)
+                    break
+                
+                # Enterキーで決定
+                elif event.sym == tcod.event.KeySym.RETURN:
+                    return current_quantity 

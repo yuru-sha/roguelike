@@ -20,16 +20,18 @@ from roguelike.world.entity.item_functions import (
     cast_paralyze,
     cast_berserk,
 )
+from roguelike.world.entity.inventory import InventorySystem
 
 class EntityFactory:
     """エンティティの生成を管理するファクトリクラス"""
     
-    def __init__(self, world: Any):
+    def __init__(self, world: Any, engine=None):
         self.world = world
+        self.engine = engine
     
     def create_player(self, x: int, y: int) -> int:
         """プレイヤーエンティティを作成"""
-        return self.world.create_entity(
+        player = self.world.create_entity(
             Position(x=x, y=y),
             Renderable(
                 char="@",
@@ -37,14 +39,35 @@ class EntityFactory:
                 bg_color=(0, 0, 0)
             ),
             Fighter(
-                max_hp=30,
-                hp=30,
+                max_hp=12,  # Rogueの初期HP
+                hp=12,
                 defense=2,
                 power=5
             ),
-            Inventory(capacity=26),
+            Inventory(capacity=26),  # a-zの26文字分
             Name(name="Player")
         )
+        
+        # 初期装備の作成と装備
+        dagger = self.create_dagger(x, y)
+        leather_armor = self.create_leather_armor(x, y)
+        bow = self.create_bow(x, y)
+        arrows = self.create_arrows(x, y, count=25)  # 25-30本
+        food = self.create_food(x, y, count=3)  # 3-6個
+        
+        # インベントリに追加
+        inventory_system = InventorySystem(self.world, self.engine)
+        inventory_system.add_item(player, dagger)
+        inventory_system.add_item(player, leather_armor)
+        inventory_system.add_item(player, bow)
+        inventory_system.add_item(player, arrows)
+        inventory_system.add_item(player, food)
+        
+        # 装備を装着
+        inventory_system.toggle_equipment(player, dagger)
+        inventory_system.toggle_equipment(player, leather_armor)
+        
+        return player
     
     def create_monster(self, x: int, y: int, monster_type: str) -> int:
         """モンスターエンティティを作成"""
@@ -182,7 +205,7 @@ class EntityFactory:
         self.world.add_component(shield, Name(name="Shield"))
         self.world.add_component(shield, Item())
         self.world.add_component(shield, Equipment(
-            slot="armor",
+            slot="shield",
             defense_bonus=1
         ))
         
@@ -270,3 +293,101 @@ class EntityFactory:
         ))
         
         return potion 
+    
+    def create_dagger(self, x: int, y: int) -> int:
+        """短剣を作成（+1, +1）"""
+        dagger = self.world.create_entity()
+        
+        self.world.add_component(dagger, Position(x=x, y=y))
+        self.world.add_component(dagger, Renderable(
+            char=")",
+            fg_color=(170, 170, 170),
+            bg_color=(0, 0, 0)
+        ))
+        self.world.add_component(dagger, Name(name="Dagger"))
+        self.world.add_component(dagger, Item())
+        self.world.add_component(dagger, Equipment(
+            slot="weapon",
+            power_bonus=1,
+            defense_bonus=1
+        ))
+        
+        return dagger
+        
+    def create_leather_armor(self, x: int, y: int) -> int:
+        """革鎧を作成（+1, +1）"""
+        armor = self.world.create_entity()
+        
+        self.world.add_component(armor, Position(x=x, y=y))
+        self.world.add_component(armor, Renderable(
+            char="[",
+            fg_color=(139, 69, 19),
+            bg_color=(0, 0, 0)
+        ))
+        self.world.add_component(armor, Name(name="Leather Armor"))
+        self.world.add_component(armor, Item())
+        self.world.add_component(armor, Equipment(
+            slot="armor",
+            power_bonus=1,
+            defense_bonus=1
+        ))
+        
+        return armor
+        
+    def create_bow(self, x: int, y: int) -> int:
+        """弓を作成"""
+        bow = self.world.create_entity()
+        
+        self.world.add_component(bow, Position(x=x, y=y))
+        self.world.add_component(bow, Renderable(
+            char=")",
+            fg_color=(139, 69, 19),
+            bg_color=(0, 0, 0)
+        ))
+        self.world.add_component(bow, Name(name="Bow"))
+        self.world.add_component(bow, Item())
+        self.world.add_component(bow, Equipment(
+            slot="ranged",
+            power_bonus=1
+        ))
+        
+        return bow
+        
+    def create_arrows(self, x: int, y: int, count: int = 25) -> int:
+        """矢を作成"""
+        arrows = self.world.create_entity()
+        
+        self.world.add_component(arrows, Position(x=x, y=y))
+        self.world.add_component(arrows, Renderable(
+            char="/",
+            fg_color=(170, 170, 170),
+            bg_color=(0, 0, 0)
+        ))
+        self.world.add_component(arrows, Name(name="Arrows"))
+        self.world.add_component(arrows, Item(stackable=True))
+        self.world.add_component(arrows, Stackable(count=count))
+        self.world.add_component(arrows, Equipment(
+            slot="ammo",
+            power_bonus=1
+        ))
+        
+        return arrows
+        
+    def create_food(self, x: int, y: int, count: int = 1) -> int:
+        """食料を作成"""
+        food = self.world.create_entity()
+        
+        self.world.add_component(food, Position(x=x, y=y))
+        self.world.add_component(food, Renderable(
+            char="%",
+            fg_color=(139, 69, 19),
+            bg_color=(0, 0, 0)
+        ))
+        self.world.add_component(food, Name(name="Food Ration"))
+        self.world.add_component(food, Item(
+            use_function=lambda world, entity, **kwargs: True,  # 仮の実装
+            stackable=True
+        ))
+        self.world.add_component(food, Stackable(count=count))
+        
+        return food 
