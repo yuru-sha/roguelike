@@ -34,27 +34,45 @@ class GameStates(Enum):
 # Colors
 class Colors:
     """Color constants."""
-    # Map colors
-    DARK_WALL = (0, 0, 100)
-    DARK_GROUND = (50, 50, 150)
-    LIGHT_WALL = (130, 110, 50)
-    LIGHT_GROUND = (200, 180, 50)
-    
-    # Entity colors
-    PLAYER = (255, 255, 255)  # White
-    ORC = (63, 127, 63)       # Green
-    TROLL = (0, 127, 0)       # Darker green
-    
-    # UI colors
-    WHITE = (255, 255, 255)
     BLACK = (0, 0, 0)
+    WHITE = (255, 255, 255)
     RED = (255, 0, 0)
     GREEN = (0, 255, 0)
     BLUE = (0, 0, 255)
     YELLOW = (255, 255, 0)
     MAGENTA = (255, 0, 255)
     CYAN = (0, 255, 255)
-    LIGHT_CYAN = (128, 255, 255)  # For item messages
+    
+    # Light colors
+    LIGHT_RED = (255, 127, 127)
+    LIGHT_GREEN = (127, 255, 127)
+    LIGHT_BLUE = (127, 127, 255)
+    LIGHT_YELLOW = (255, 255, 127)
+    LIGHT_MAGENTA = (255, 127, 255)
+    LIGHT_CYAN = (127, 255, 255)
+    LIGHT_GRAY = (192, 192, 192)
+    
+    # Dark colors
+    DARK_RED = (127, 0, 0)
+    DARK_GREEN = (0, 127, 0)
+    DARK_BLUE = (0, 0, 127)
+    DARK_YELLOW = (127, 127, 0)
+    DARK_MAGENTA = (127, 0, 127)
+    DARK_CYAN = (0, 127, 127)
+    DARK_GRAY = (64, 64, 64)
+    
+    # Browns
+    BROWN = (165, 42, 42)
+    LIGHT_BROWN = (210, 105, 30)
+    DARK_BROWN = (101, 67, 33)
+    
+    # Game specific colors
+    PLAYER = WHITE
+    DARK_WALL = DARK_GRAY
+    LIGHT_WALL = LIGHT_GRAY
+    DARK_GROUND = (50, 50, 150)
+    LIGHT_GROUND = (200, 180, 50)
+    VIOLET = (238, 130, 238)
 
 # Entity settings
 MAX_MONSTERS_PER_ROOM = 3
