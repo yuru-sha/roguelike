@@ -1,46 +1,51 @@
-# TODO: Add armor durability system
-# TODO: Add armor enchantment system
-# FIXME: Missing Item component in armor creation
-# OPTIMIZE: Armor slot validation could be added
-# WARNING: Armor stats might need balancing
-# REVIEW: Consider if armor should affect movement speed
-# HACK: Armor display characters should be moved to constants
+"""
+Armor prefab functions.
+"""
 
-from typing import Any, Tuple
+from typing import Tuple
 
-from roguelike.core.constants import Colors
 from roguelike.world.entity.components.base import (
-    Position, Renderable, RenderOrder,
-    Equipment, EquipmentSlot
+    Position, Renderable, Item, Equipment,
+    RenderOrder, EquipmentSlot
 )
 
-def create_armor(world: Any, x: int, y: int, slot: EquipmentSlot, name: str, defense_bonus: int, color: Tuple[int, int, int] = Colors.LIGHT_GRAY) -> int:
+def create_armor(
+    world,
+    x: int,
+    y: int,
+    slot: EquipmentSlot,
+    name: str,
+    defense_bonus: int,
+    color: Tuple[int, int, int]
+) -> int:
     """
     Create an armor entity.
     
     Args:
         world: The ECS world
-        x: X coordinate
-        y: Y coordinate
-        slot: Equipment slot for the armor
+        x: X position
+        y: Y position
+        slot: Equipment slot
         name: Armor name
-        defense_bonus: Defense bonus when equipped
-        color: Color of the armor (default: light gray)
+        defense_bonus: Defense bonus
+        color: Render color
         
     Returns:
-        The armor entity ID
+        Armor entity ID
     """
     armor = world.create_entity()
     
-    world.add_component(armor, Position(x, y))
+    # Add components
+    world.add_component(armor, Position(x=x, y=y))
     world.add_component(armor, Renderable(
         char='[',
         color=color,
         render_order=RenderOrder.ITEM,
         name=name
     ))
+    world.add_component(armor, Item(name=name))
     world.add_component(armor, Equipment(
-        slot=slot,
+        equipment_slot=slot,
         defense_bonus=defense_bonus
     ))
     

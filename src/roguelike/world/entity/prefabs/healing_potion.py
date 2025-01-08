@@ -1,64 +1,58 @@
-# TODO: Add potion mixing system
-# TODO: Add potion identification system
-# FIXME: Healing amount should be based on player level
-# OPTIMIZE: Healing calculations could be simplified
-# WARNING: Potion healing amount might need balancing
-# REVIEW: Consider if potions should have side effects
-# HACK: Potion display characters should be moved to constants
+"""
+Healing potion prefab functions.
+"""
 
-from typing import Any, Optional
+from typing import Optional
 
 from roguelike.core.constants import Colors
 from roguelike.world.entity.components.base import (
-    Position, Renderable, RenderOrder,
-    Item, Fighter
+    Position, Renderable, Item, Fighter,
+    RenderOrder
 )
 
-def create_healing_potion(world: Any, x: int, y: int) -> int:
+def heal(entity: int, amount: int) -> Optional[str]:
+    """
+    Heal an entity.
+    
+    Args:
+        entity: Entity to heal
+        amount: Amount to heal
+        
+    Returns:
+        Message describing what happened
+    """
+    fighter = world.component_for_entity(entity, Fighter)
+    
+    if fighter.hp == fighter.max_hp:
+        return "You are already at full health."
+    
+    fighter.heal(amount)
+    return f"Your wounds start to feel better! You heal for {amount} hit points."
+
+def create_healing_potion(world, x: int, y: int) -> int:
     """
     Create a healing potion entity.
     
     Args:
         world: The ECS world
-        x: X coordinate
-        y: Y coordinate
+        x: X position
+        y: Y position
         
     Returns:
-        The healing potion entity ID
+        Healing potion entity ID
     """
     potion = world.create_entity()
     
-    world.add_component(potion, Position(x, y))
+    world.add_component(potion, Position(x=x, y=y))
     world.add_component(potion, Renderable(
         char='!',
-        color=Colors.MAGENTA,
+        color=Colors.PURPLE,
         render_order=RenderOrder.ITEM,
         name="Healing Potion"
     ))
     world.add_component(potion, Item(
         name="Healing Potion",
-        use_function=use_healing_potion,
-        use_args={'amount': 40}
+        use_function=lambda entity, **kwargs: heal(entity, 40)
     ))
     
-    return potion
-
-def use_healing_potion(user: int, world: Any, **kwargs) -> Optional[str]:
-    """
-    Use a healing potion to restore HP.
-    
-    Args:
-        user: The entity using the potion
-        world: The ECS world
-        
-    Returns:
-        A message describing what happened
-    """
-    amount = kwargs.get('amount', 0)
-    fighter = world.component_for_entity(user, Fighter)
-    
-    if fighter.hp == fighter.max_hp:
-        return "You are already at full health!"
-    
-    fighter.heal(amount)
-    return f"Your wounds start to feel better! You recover {amount} HP." 
+    return potion 

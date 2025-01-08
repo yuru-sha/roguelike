@@ -18,6 +18,8 @@ class GameStates(Enum):
     TARGETING = auto()
     LEVEL_UP = auto()
     CHARACTER_SCREEN = auto()
+    SAVE_GAME = auto()
+    LOAD_GAME = auto()
 
 @dataclass
 class Message:

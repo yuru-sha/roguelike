@@ -4,6 +4,8 @@ The main game engine class that coordinates all game systems.
 
 from typing import Dict, Any, Optional, List, Tuple
 import sys
+import os
+from pathlib import Path
 import numpy as np
 import tcod
 import tcod.event
@@ -16,8 +18,9 @@ from roguelike.core.constants import (
     TORCH_RADIUS,
     Colors
 )
-from roguelike.game.states.game_state import GameState
+from roguelike.game.states.game_state import GameState, GameStates
 from roguelike.ui.handlers.input_handler import InputHandler
+from roguelike.ui.screens.save_load_screen import SaveLoadScreen
 from roguelike.world.map.generator.dungeon_generator import DungeonGenerator
 from roguelike.world.entity.components.base import (
     Position, Renderable, Fighter, Item, Equipment,
@@ -40,6 +43,10 @@ class Engine:
         """Initialize the game engine."""
         logger.info("Initializing game engine")
         
+        # Get the project root directory
+        project_root = Path(__file__).parent.parent.parent.parent
+        assets_path = project_root / 'data' / 'assets' / 'dejavu10x10_gs_tc.png'
+        
         # Initialize TCOD
         self.root_console = tcod.console.Console(SCREEN_WIDTH, SCREEN_HEIGHT)
         self.context = tcod.context.new(
@@ -47,7 +54,7 @@ class Engine:
             rows=SCREEN_HEIGHT,
             title="Roguelike",
             tileset=tcod.tileset.load_tilesheet(
-                'data/assets/dejavu10x10_gs_tc.png',
+                str(assets_path),
                 32, 8, tcod.tileset.CHARMAP_TCOD
             ),
             vsync=True
@@ -70,6 +77,9 @@ class Engine:
         
         # Game running flag
         self.running = True
+        
+        # UI screens
+        self.save_load_screen: Optional[SaveLoadScreen] = None
         
         logger.info("Game engine initialized")
     
@@ -486,9 +496,47 @@ class Engine:
                 logger.debug("Player waited")
                 pass  # Do nothing, just pass the turn
             elif action_type == 'exit':
-                logger.info("Player initiated game exit")
-                self.quit_game()
-                return
+                if self.game_state.state in (GameStates.SAVE_GAME, GameStates.LOAD_GAME):
+                    self.game_state.state = GameStates.PLAYERS_TURN
+                    self.save_load_screen = None
+                else:
+                    logger.info("Player initiated game exit")
+                    self.quit_game()
+                    return
+            elif action_type == 'save_game':
+                self.game_state.state = GameStates.SAVE_GAME
+                self.save_load_screen = SaveLoadScreen(self.root_console, is_save=True)
+            elif action_type == 'load_game':
+                self.game_state.state = GameStates.LOAD_GAME
+                self.save_load_screen = SaveLoadScreen(self.root_console, is_save=False)
+            elif action_type == 'select' and self.save_load_screen:
+                if self.game_state.state == GameStates.SAVE_GAME:
+                    self.save_game(self.save_load_screen.selected_slot)
+                    self.game_state.add_message(
+                        f"Game saved to slot {self.save_load_screen.selected_slot}",
+                        Colors.GREEN
+                    )
+                    self.game_state.state = GameStates.PLAYERS_TURN
+                    self.save_load_screen = None
+                elif self.game_state.state == GameStates.LOAD_GAME:
+                    if self.load_game(self.save_load_screen.selected_slot):
+                        self.game_state.add_message(
+                            f"Game loaded from slot {self.save_load_screen.selected_slot}",
+                            Colors.GREEN
+                        )
+                        self.game_state.state = GameStates.PLAYERS_TURN
+                        self.save_load_screen = None
+                    else:
+                        self.game_state.add_message(
+                            "Failed to load game",
+                            Colors.RED
+                        )
+            elif action_type == 'move_cursor' and self.save_load_screen:
+                dy = action.get('dy', 0)
+                if dy < 0:
+                    self.save_load_screen.selected_slot = max(0, self.save_load_screen.selected_slot - 1)
+                elif dy > 0:
+                    self.save_load_screen.selected_slot = min(9, self.save_load_screen.selected_slot + 1)
             
             # Update FOV after any action
             self._recompute_fov()
@@ -574,3 +622,24 @@ class Engine:
         finally:
             logger.info("Cleaning up game resources")
             self.cleanup() 
+    
+    def render(self) -> None:
+        """Render the game screen."""
+        try:
+            # Clear the console
+            self.root_console.clear()
+            
+            if self.game_state.state in (GameStates.SAVE_GAME, GameStates.LOAD_GAME) and self.save_load_screen:
+                # Render save/load screen
+                self.save_load_screen.render()
+            else:
+                # Render normal game screen
+                self._render_map()
+                self._render_entities()
+            
+            # Present the console
+            self.context.present(self.root_console)
+            
+        except Exception as e:
+            logger.error(f"Error in render: {str(e)}", exc_info=True)
+            raise 

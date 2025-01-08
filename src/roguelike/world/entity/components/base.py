@@ -257,13 +257,13 @@ class EquipmentSlots(SerializableComponent):
 @dataclass
 class Equipment(SerializableComponent):
     """Equipment component."""
+    equipment_slot: EquipmentSlot
     power_bonus: int = 0
     defense_bonus: int = 0
-    max_hp_bonus: int = 0
     weapon_type: Optional[WeaponType] = None
     
     def can_dual_wield(self) -> bool:
-        """Check if this weapon can be dual wielded."""
+        """Check if this equipment can be dual wielded."""
         return self.weapon_type in [WeaponType.ONE_HANDED, WeaponType.DUAL_WIELD]
 
 @dataclass

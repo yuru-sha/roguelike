@@ -1,44 +1,50 @@
-# TODO: Add shield durability system
-# TODO: Add shield blocking mechanics
-# FIXME: Missing Item component in shield creation
-# OPTIMIZE: Shield bonus calculations could be simplified
-# WARNING: Shield stats might need balancing
-# REVIEW: Consider if shields should affect dodge chance
-# HACK: Shield display characters should be moved to constants
+"""
+Shield prefab functions.
+"""
 
-from typing import Any
+from typing import Tuple
 
 from roguelike.core.constants import Colors
 from roguelike.world.entity.components.base import (
-    Position, Renderable, RenderOrder,
-    Equipment, EquipmentSlot
+    Position, Renderable, Item, Equipment,
+    RenderOrder, EquipmentSlot
 )
 
-def create_shield(world: Any, x: int, y: int, name: str, defense_bonus: int) -> int:
+def create_shield(
+    world,
+    x: int,
+    y: int,
+    name: str,
+    defense_bonus: int,
+    color: Tuple[int, int, int] = Colors.LIGHT_GRAY
+) -> int:
     """
     Create a shield entity.
     
     Args:
         world: The ECS world
-        x: X coordinate
-        y: Y coordinate
+        x: X position
+        y: Y position
         name: Shield name
-        defense_bonus: Defense bonus when equipped
+        defense_bonus: Defense bonus
+        color: Render color
         
     Returns:
-        The shield entity ID
+        Shield entity ID
     """
     shield = world.create_entity()
     
-    world.add_component(shield, Position(x, y))
+    # Add components
+    world.add_component(shield, Position(x=x, y=y))
     world.add_component(shield, Renderable(
         char=']',
-        color=Colors.BROWN,
+        color=color,
         render_order=RenderOrder.ITEM,
         name=name
     ))
+    world.add_component(shield, Item(name=name))
     world.add_component(shield, Equipment(
-        slot=EquipmentSlot.OFF_HAND,
+        equipment_slot=EquipmentSlot.OFF_HAND,
         defense_bonus=defense_bonus
     ))
     
