@@ -2,7 +2,7 @@
 The main game engine class that coordinates all game systems.
 """
 
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple
 import sys
 import numpy as np
 import tcod
@@ -19,11 +19,15 @@ from roguelike.core.constants import (
 from roguelike.game.states.game_state import GameState
 from roguelike.ui.handlers.input_handler import InputHandler
 from roguelike.world.map.generator.dungeon_generator import DungeonGenerator
-from roguelike.world.entity.components.base import Position, Renderable, Fighter, Item
+from roguelike.world.entity.components.base import (
+    Position, Renderable, Fighter, Item, Equipment,
+    Level, AI, Inventory, EquipmentSlots, Corpse
+)
 from roguelike.world.entity.prefabs.player import create_player
 from roguelike.world.spawner.spawner import populate_dungeon
 from roguelike.world.map.tiles import TileType
 from roguelike.utils.logging import GameLogger
+from roguelike.utils.serialization import SaveManager
 
 logger = GameLogger.get_instance()
 
@@ -69,9 +73,115 @@ class Engine:
         
         logger.info("Game engine initialized")
     
+    def save_game(self, slot: int = 0) -> None:
+        """
+        Save the current game state.
+        
+        Args:
+            slot: Save slot number
+        """
+        logger.info(f"Saving game to slot {slot}")
+        
+        # Collect all entities and their components
+        entities = {}
+        for entity_id in self.world.entities:
+            components = {}
+            for component_type in self.world.components_for_entity(entity_id):
+                component = self.world.component_for_entity(entity_id, component_type)
+                components[component_type.__name__] = component.to_dict()
+            entities[entity_id] = components
+        
+        # Convert tiles to serializable format
+        tiles_data = []
+        for row in self.tiles:
+            tiles_row = []
+            for tile in row:
+                tiles_row.append({
+                    'blocked': tile.blocked,
+                    'block_sight': tile.block_sight,
+                    'explored': tile.explored,
+                    'tile_type': tile.tile_type.name
+                })
+            tiles_data.append(tiles_row)
+        
+        # Prepare save data
+        save_data = {
+            'game_state': self.game_state.to_dict(),
+            'entities': entities,
+            'tiles': tiles_data,
+            'player_id': self.player,
+            'dungeon_level': self.game_state.dungeon_level
+        }
+        
+        # Save to file
+        SaveManager.save_game(save_data, slot)
+        logger.info("Game saved successfully")
+    
+    def load_game(self, slot: int = 0) -> bool:
+        """
+        Load a saved game state.
+        
+        Args:
+            slot: Save slot number
+            
+        Returns:
+            True if game was loaded successfully
+        """
+        logger.info(f"Loading game from slot {slot}")
+        
+        # Load save data
+        save_data = SaveManager.load_game(slot)
+        if not save_data:
+            logger.warning(f"No save file found in slot {slot}")
+            return False
+        
+        try:
+            # Clear current state
+            self.world = esper.World()
+            
+            # Restore game state
+            self.game_state = GameState.from_dict(save_data['game_state'])
+            
+            # Restore tiles
+            self.tiles = np.empty((MAP_HEIGHT, MAP_WIDTH), dtype=object)
+            for y, row in enumerate(save_data['tiles']):
+                for x, tile_data in enumerate(row):
+                    self.tiles[y][x] = TileType[tile_data['tile_type']].value
+                    self.tiles[y][x].explored = tile_data['explored']
+            
+            # Restore entities
+            for entity_id, components in save_data['entities'].items():
+                entity_id = int(entity_id)  # JSON converts keys to strings
+                for component_name, component_data in components.items():
+                    module = __import__('roguelike.world.entity.components.base', fromlist=[component_name])
+                    component_class = getattr(module, component_name)
+                    component = component_class.from_dict(component_data)
+                    self.world.add_component(entity_id, component)
+            
+            # Restore player reference
+            self.player = save_data['player_id']
+            
+            # Recompute FOV
+            self._initialize_fov()
+            
+            logger.info("Game loaded successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to load game: {e}", exc_info=True)
+            return False
+    
+    def auto_save(self) -> None:
+        """Automatically save the game to a special auto-save slot."""
+        try:
+            self.save_game(slot=-1)  # Use -1 for auto-save slot
+        except Exception as e:
+            logger.error(f"Auto-save failed: {e}", exc_info=True)
+    
     def quit_game(self) -> None:
         """Safely quit the game."""
         logger.info("Quitting game")
+        self.auto_save()  # Auto-save before quitting
         self.running = False
     
     def cleanup(self) -> None:

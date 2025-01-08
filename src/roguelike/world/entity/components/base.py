@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from enum import IntEnum, Enum, auto
 from typing import Tuple, Optional, Dict, Any, Callable
 
+from roguelike.world.entity.components.serializable import SerializableComponent
+
 class RenderOrder(IntEnum):
     """Render order for entities."""
     CORPSE = 1
@@ -41,7 +43,7 @@ class WeaponType(Enum):
     THROWN = auto()
 
 @dataclass
-class Position:
+class Position(SerializableComponent):
     """Position component."""
     x: int
     y: int
@@ -51,7 +53,7 @@ class Position:
         return max(abs(self.x - other.x), abs(self.y - other.y))
 
 @dataclass
-class Renderable:
+class Renderable(SerializableComponent):
     """Renderable component."""
     char: str
     color: Tuple[int, int, int]
@@ -60,7 +62,7 @@ class Renderable:
     always_visible: bool = False
 
 @dataclass
-class Fighter:
+class Fighter(SerializableComponent):
     """Combat stats component."""
     max_hp: int
     hp: int
@@ -93,13 +95,13 @@ class Fighter:
         self.hp = min(self.max_hp, self.hp + amount)
 
 @dataclass
-class AI:
+class AI(SerializableComponent):
     """AI behavior component."""
     behavior: str = "basic"
     turns_confused: int = 0
 
 @dataclass
-class Inventory:
+class Inventory(SerializableComponent):
     """Inventory component."""
     capacity: int
     items: list = None
@@ -134,16 +136,36 @@ class Inventory:
         self.items.remove(item)
 
 @dataclass
-class Item:
+class Item(SerializableComponent):
     """Item component."""
     name: str
     use_function: Optional[Callable] = None
     use_args: Optional[Dict[str, Any]] = None
     targeting: bool = False
     targeting_message: Optional[str] = None
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Override to handle non-serializable use_function."""
+        data = super().to_dict()
+        if self.use_function is not None:
+            data['data']['use_function'] = f"{self.use_function.__module__}.{self.use_function.__name__}"
+        return data
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'Item':
+        """Override to handle non-serializable use_function."""
+        use_function_path = data['data'].pop('use_function', None)
+        instance = super().from_dict(data)
+        
+        if use_function_path:
+            module_name, function_name = use_function_path.rsplit('.', 1)
+            module = __import__(module_name, fromlist=[function_name])
+            instance.use_function = getattr(module, function_name)
+            
+        return instance
 
 @dataclass
-class Level:
+class Level(SerializableComponent):
     """Level component."""
     current_level: int = 1
     current_xp: int = 0
@@ -172,12 +194,7 @@ class Level:
         return self.current_xp >= self.xp_to_next_level
 
 @dataclass
-class Corpse:
-    """Corpse component."""
-    name: str 
-
-@dataclass
-class EquipmentSlots:
+class EquipmentSlots(SerializableComponent):
     """Component for managing equipment slots."""
     slots: Dict[EquipmentSlot, Optional[int]] = field(default_factory=lambda: {slot: None for slot in EquipmentSlot})
     
@@ -238,9 +255,8 @@ class EquipmentSlots:
         self.slots[slot] = None
 
 @dataclass
-class Equipment:
-    """Component for equipment items."""
-    slot: EquipmentSlot
+class Equipment(SerializableComponent):
+    """Equipment component."""
     power_bonus: int = 0
     defense_bonus: int = 0
     max_hp_bonus: int = 0
@@ -248,4 +264,9 @@ class Equipment:
     
     def can_dual_wield(self) -> bool:
         """Check if this weapon can be dual wielded."""
-        return self.weapon_type in [WeaponType.ONE_HANDED, WeaponType.DUAL_WIELD] 
+        return self.weapon_type in [WeaponType.ONE_HANDED, WeaponType.DUAL_WIELD]
+
+@dataclass
+class Corpse(SerializableComponent):
+    """Corpse component."""
+    name: str 
