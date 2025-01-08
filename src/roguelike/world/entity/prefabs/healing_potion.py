@@ -1,3 +1,11 @@
+# TODO: Add potion mixing system
+# TODO: Add potion identification system
+# FIXME: Healing amount should be based on player level
+# OPTIMIZE: Healing calculations could be simplified
+# WARNING: Potion healing amount might need balancing
+# REVIEW: Consider if potions should have side effects
+# HACK: Potion display characters should be moved to constants
+
 from typing import Any, Optional
 
 from roguelike.core.constants import Colors

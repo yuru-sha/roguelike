@@ -1,3 +1,11 @@
+# TODO: Add more component types for advanced features
+# TODO: Add component serialization for save/load
+# FIXME: Equipment slots should handle two-handed weapons properly
+# OPTIMIZE: Component access patterns could be improved
+# WARNING: Some components might need better validation
+# REVIEW: Consider if components should be more granular
+# HACK: Some component fields could be more strongly typed
+
 from dataclasses import dataclass, field
 from enum import IntEnum, Enum, auto
 from typing import Tuple, Optional, Dict, Any, Callable
@@ -27,6 +35,7 @@ class WeaponType(Enum):
     """Weapon type enum."""
     ONE_HANDED = auto()
     TWO_HANDED = auto()
+    DUAL_WIELD = auto()
     BOW = auto()
     CROSSBOW = auto()
     THROWN = auto()
@@ -172,7 +181,7 @@ class EquipmentSlots:
     """Component for managing equipment slots."""
     slots: Dict[EquipmentSlot, Optional[int]] = field(default_factory=lambda: {slot: None for slot in EquipmentSlot})
     
-    def equip(self, slot: EquipmentSlot, item: int, world: Any) -> None:
+    def equip(self, slot: EquipmentSlot, item: int, world: Any) -> Optional[str]:
         """
         Equip an item to a slot.
         
@@ -180,12 +189,37 @@ class EquipmentSlots:
             slot: The equipment slot
             item: The item entity ID
             world: The ECS world
+            
+        Returns:
+            Error message if equip failed, None if successful
         """
         # 既に装備しているアイテムを外す
         if self.slots[slot] is not None:
             self.unequip(slot, world)
         
+        # 二刀流のチェック
+        if slot in [EquipmentSlot.MAIN_HAND, EquipmentSlot.OFF_HAND]:
+            equipment = world.component_for_entity(item, Equipment)
+            if equipment.weapon_type == WeaponType.TWO_HANDED:
+                # 両手武器は片方のスロットしか使えない
+                if slot == EquipmentSlot.OFF_HAND:
+                    return "Two-handed weapons must be equipped in the main hand."
+                # 両手武器を装備する場合、オフハンドを空ける
+                if self.slots[EquipmentSlot.OFF_HAND] is not None:
+                    self.unequip(EquipmentSlot.OFF_HAND, world)
+            elif slot == EquipmentSlot.OFF_HAND:
+                # オフハンドに武器を装備する場合、二刀流可能かチェック
+                if not equipment.can_dual_wield():
+                    return "This weapon cannot be dual wielded."
+                # メインハンドの武器も二刀流可能かチェック
+                main_hand = self.slots[EquipmentSlot.MAIN_HAND]
+                if main_hand is not None:
+                    main_equipment = world.component_for_entity(main_hand, Equipment)
+                    if not main_equipment.can_dual_wield():
+                        return "Cannot dual wield with current main hand weapon."
+        
         self.slots[slot] = item
+        return None
     
     def unequip(self, slot: EquipmentSlot, world: Any) -> None:
         """
@@ -195,7 +229,13 @@ class EquipmentSlots:
             slot: The equipment slot
             world: The ECS world
         """
-        self.slots[slot] = None 
+        # 両手武器を外す場合、オフハンドも空ける
+        if slot == EquipmentSlot.MAIN_HAND and self.slots[slot] is not None:
+            equipment = world.component_for_entity(self.slots[slot], Equipment)
+            if equipment.weapon_type == WeaponType.TWO_HANDED:
+                self.slots[EquipmentSlot.OFF_HAND] = None
+        
+        self.slots[slot] = None
 
 @dataclass
 class Equipment:
@@ -204,4 +244,8 @@ class Equipment:
     power_bonus: int = 0
     defense_bonus: int = 0
     max_hp_bonus: int = 0
-    weapon_type: Optional[WeaponType] = None 
+    weapon_type: Optional[WeaponType] = None
+    
+    def can_dual_wield(self) -> bool:
+        """Check if this weapon can be dual wielded."""
+        return self.weapon_type in [WeaponType.ONE_HANDED, WeaponType.DUAL_WIELD] 

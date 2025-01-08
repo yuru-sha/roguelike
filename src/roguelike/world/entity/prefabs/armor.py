@@ -1,3 +1,11 @@
+# TODO: Add armor durability system
+# TODO: Add armor enchantment system
+# FIXME: Missing Item component in armor creation
+# OPTIMIZE: Armor slot validation could be added
+# WARNING: Armor stats might need balancing
+# REVIEW: Consider if armor should affect movement speed
+# HACK: Armor display characters should be moved to constants
+
 from typing import Any, Tuple
 
 from roguelike.core.constants import Colors

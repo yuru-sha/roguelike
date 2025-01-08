@@ -4,6 +4,14 @@ Game constants.
 
 from enum import Enum, auto
 
+# TODO: Add configuration file support
+# TODO: Add difficulty level settings
+# FIXME: Some constants should be calculated based on screen size
+# OPTIMIZE: Color definitions could be cached
+# WARNING: Some game balance constants might need adjustment
+# REVIEW: Consider if more constants should be configurable
+# HACK: Some magic numbers should be explained or renamed
+
 # Screen dimensions
 SCREEN_WIDTH = 80
 SCREEN_HEIGHT = 50

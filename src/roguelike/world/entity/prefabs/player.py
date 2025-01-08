@@ -1,3 +1,11 @@
+# TODO: Add player experience and leveling system
+# TODO: Add player skills and abilities
+# FIXME: Initial player stats should be loaded from configuration
+# OPTIMIZE: Equipment bonus calculations could be cached
+# WARNING: Player inventory capacity might need balancing
+# REVIEW: Consider if equipment slots should affect player movement
+# HACK: Magic numbers in player stats should be moved to constants
+
 from typing import Any, Tuple
 
 from roguelike.core.constants import (

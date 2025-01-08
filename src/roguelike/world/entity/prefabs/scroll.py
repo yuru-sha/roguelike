@@ -1,3 +1,11 @@
+# TODO: Add scroll identification system
+# TODO: Add more scroll types
+# FIXME: Teleport should check for valid destination
+# OPTIMIZE: Scroll targeting could be simplified
+# WARNING: Scroll effects might need balancing
+# REVIEW: Consider if scrolls should require magic power
+# HACK: Scroll display characters should be moved to constants
+
 from typing import Any, Optional
 import random
 

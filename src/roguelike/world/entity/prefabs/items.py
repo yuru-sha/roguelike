@@ -1,3 +1,12 @@
+# TODO: Add item identification system for unidentified items
+# TODO: Add item durability system
+# TODO: Add item enchantment system
+# FIXME: Ring and necklace creation functions are missing Item name parameter
+# OPTIMIZE: Item chance calculations could be cached
+# WARNING: Amulet of Yendor stats might need balancing
+# REVIEW: Consider if weapon types should affect damage calculation
+# HACK: Magic numbers in item stats should be moved to constants
+
 from typing import Dict, Any, Optional, Callable, Tuple
 
 from roguelike.core.constants import Colors
@@ -460,13 +469,25 @@ ITEM_CHANCES: Dict[str, Dict[str, Any]] = {
         'chance': 30,
         'min_level': 1,
         'max_level': 5,
-        'create_function': lambda w, x, y: create_weapon(w, x, y, "Dagger", 2, WeaponType.ONE_HANDED, Colors.LIGHT_GRAY)
+        'create_function': lambda w, x, y: create_weapon(w, x, y, "Dagger", 2, WeaponType.DUAL_WIELD, Colors.LIGHT_GRAY)
     },
     'short_sword': {
         'chance': 25,
         'min_level': 2,
         'max_level': 7,
         'create_function': lambda w, x, y: create_weapon(w, x, y, "Short Sword", 3, WeaponType.ONE_HANDED, Colors.LIGHT_GRAY)
+    },
+    'wakizashi': {  # 脇差（二刀流用の短剣）
+        'chance': 20,
+        'min_level': 3,
+        'max_level': None,
+        'create_function': lambda w, x, y: create_weapon(w, x, y, "Wakizashi", 2, WeaponType.DUAL_WIELD, Colors.LIGHT_GRAY)
+    },
+    'ninja_to': {  # 忍者刀（二刀流用の短剣）
+        'chance': 15,
+        'min_level': 4,
+        'max_level': None,
+        'create_function': lambda w, x, y: create_weapon(w, x, y, "Ninja-to", 3, WeaponType.DUAL_WIELD, Colors.LIGHT_GRAY)
     },
     'long_sword': {
         'chance': 20,

@@ -1,3 +1,11 @@
+# TODO: Add hunger system
+# TODO: Add food variety and effects
+# FIXME: Food effects should be implemented
+# OPTIMIZE: Food use function could be simplified
+# WARNING: Food nutrition values might need balancing
+# REVIEW: Consider if food should affect player stats
+# HACK: Food display characters should be moved to constants
+
 from typing import Any, Optional
 
 from roguelike.core.constants import Colors

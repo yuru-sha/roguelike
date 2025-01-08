@@ -1,3 +1,11 @@
+# TODO: Add shield durability system
+# TODO: Add shield blocking mechanics
+# FIXME: Missing Item component in shield creation
+# OPTIMIZE: Shield bonus calculations could be simplified
+# WARNING: Shield stats might need balancing
+# REVIEW: Consider if shields should affect dodge chance
+# HACK: Shield display characters should be moved to constants
+
 from typing import Any
 
 from roguelike.core.constants import Colors

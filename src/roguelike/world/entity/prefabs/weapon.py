@@ -1,3 +1,11 @@
+# TODO: Add weapon durability system
+# TODO: Add weapon enchantment system
+# FIXME: Missing Item component in weapon creation
+# OPTIMIZE: Weapon type checks could be simplified
+# WARNING: Weapon stats might need balancing
+# REVIEW: Consider if weapon types should affect attack speed
+# HACK: Weapon display characters should be moved to constants
+
 from typing import Any, Tuple
 
 from roguelike.core.constants import Colors
