@@ -126,6 +126,34 @@ def create_confusion_scroll(world: Any, x: int, y: int) -> int:
     
     return scroll
 
+def create_amulet_of_yendor(world: Any, x: int, y: int) -> int:
+    """
+    Create the Amulet of Yendor entity.
+    
+    Args:
+        world: The ECS world
+        x: X coordinate
+        y: Y coordinate
+        
+    Returns:
+        The entity ID
+    """
+    amulet = world.create_entity()
+    
+    world.add_component(amulet, Position(x, y))
+    world.add_component(amulet, Renderable(
+        char='"',
+        color=Colors.YELLOW,
+        render_order=RenderOrder.ITEM,
+        name="The Amulet of Yendor"
+    ))
+    world.add_component(amulet, Item(
+        name="The Amulet of Yendor",
+        is_amulet=True
+    ))
+    
+    return amulet
+
 def use_healing_potion(user: int, world: Any, **kwargs) -> Optional[str]:
     """
     Use a healing potion.
@@ -261,5 +289,11 @@ ITEM_CHANCES: Dict[str, Dict[str, Any]] = {
         'min_level': 2,
         'max_level': None,
         'create_function': create_confusion_scroll
+    },
+    'amulet_of_yendor': {
+        'chance': 100,  # Always spawn when conditions are met
+        'min_level': 26,  # Only appears on level 26
+        'max_level': 26,
+        'create_function': create_amulet_of_yendor
     }
 } 

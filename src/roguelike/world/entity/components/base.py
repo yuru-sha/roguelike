@@ -1,12 +1,12 @@
 from dataclasses import dataclass
-from enum import Enum, auto
+from enum import IntEnum
 from typing import Tuple, Optional, Dict, Any, Callable
 
-class RenderOrder(Enum):
+class RenderOrder(IntEnum):
     """Render order for entities."""
-    CORPSE = auto()
-    ITEM = auto()
-    ACTOR = auto()
+    CORPSE = 1
+    ITEM = 2
+    ACTOR = 3
 
 @dataclass
 class Position:

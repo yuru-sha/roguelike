@@ -2,37 +2,50 @@
 Handle keyboard and mouse input.
 """
 
-from typing import Optional
+from typing import Optional, Dict, Any
 import tcod.event
 
-from roguelike.game.actions import Action, MovementAction, WaitAction, QuitAction
+from roguelike.game.states.game_state import GameStates
 
 class InputHandler:
-    """Handle keyboard and mouse input."""
+    """Handles keyboard input."""
     
-    def handle_input(self, event: tcod.event.Event) -> Optional[Action]:
-        """Handle input events and return an action if valid."""
+    def handle_input(self, event: tcod.event.Event) -> Optional[Dict[str, Any]]:
+        """
+        Handle keyboard input.
         
-        if isinstance(event, tcod.event.Quit):
-            return QuitAction()
+        Args:
+            event: The input event
             
+        Returns:
+            Action dictionary or None if input was not handled
+        """
+        # Movement keys
         if isinstance(event, tcod.event.KeyDown):
-            # Movement keys
-            if event.sym == tcod.event.K_UP:
-                return MovementAction(0, -1)
-            elif event.sym == tcod.event.K_DOWN:
-                return MovementAction(0, 1)
-            elif event.sym == tcod.event.K_LEFT:
-                return MovementAction(-1, 0)
-            elif event.sym == tcod.event.K_RIGHT:
-                return MovementAction(1, 0)
-                
+            # Arrow keys
+            if event.sym == tcod.event.KeySym.UP:
+                return {'action': 'move', 'dx': 0, 'dy': -1}
+            elif event.sym == tcod.event.KeySym.DOWN:
+                return {'action': 'move', 'dx': 0, 'dy': 1}
+            elif event.sym == tcod.event.KeySym.LEFT:
+                return {'action': 'move', 'dx': -1, 'dy': 0}
+            elif event.sym == tcod.event.KeySym.RIGHT:
+                return {'action': 'move', 'dx': 1, 'dy': 0}
+            
+            # Stairs
+            elif event.sym == tcod.event.KeySym.PERIOD and event.mod & tcod.event.Modifier.SHIFT:
+                # > key (SHIFT + .)
+                return {'action': 'use_stairs', 'direction': 'down'}
+            elif event.sym == tcod.event.KeySym.COMMA and event.mod & tcod.event.Modifier.SHIFT:
+                # < key (SHIFT + ,)
+                return {'action': 'use_stairs', 'direction': 'up'}
+            
             # Wait
-            elif event.sym == tcod.event.K_PERIOD:
-                return WaitAction()
-                
-            # Quit
-            elif event.sym == tcod.event.K_ESCAPE:
-                return QuitAction()
-                
+            elif event.sym == tcod.event.KeySym.PERIOD:
+                return {'action': 'wait'}
+            
+            # Exit
+            elif event.sym == tcod.event.KeySym.ESCAPE:
+                return {'action': 'exit'}
+        
         return None 

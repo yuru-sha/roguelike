@@ -10,7 +10,7 @@ SCREEN_HEIGHT = 50
 
 # Map dimensions
 MAP_WIDTH = 80
-MAP_HEIGHT = 43
+MAP_HEIGHT = 50
 
 # Room generation
 ROOM_MAX_SIZE = 10
@@ -33,6 +33,7 @@ class GameStates(Enum):
 
 # Colors
 class Colors:
+    """Color constants."""
     # Map colors
     DARK_WALL = (0, 0, 100)
     DARK_GROUND = (50, 50, 150)
@@ -40,19 +41,20 @@ class Colors:
     LIGHT_GROUND = (200, 180, 50)
     
     # Entity colors
-    PLAYER = (255, 255, 255)
-    ORC = (63, 127, 63)
-    TROLL = (0, 127, 0)
-    DRAGON = (255, 0, 0)
-    CORPSE = (127, 0, 0)
+    PLAYER = (255, 255, 255)  # White
+    ORC = (63, 127, 63)       # Green
+    TROLL = (0, 127, 0)       # Darker green
     
     # UI colors
     WHITE = (255, 255, 255)
     BLACK = (0, 0, 0)
     RED = (255, 0, 0)
     GREEN = (0, 255, 0)
-    YELLOW = (255, 255, 0)
     BLUE = (0, 0, 255)
+    YELLOW = (255, 255, 0)
+    MAGENTA = (255, 0, 255)
+    CYAN = (0, 255, 255)
+    LIGHT_CYAN = (128, 255, 255)  # For item messages
 
 # Entity settings
 MAX_MONSTERS_PER_ROOM = 3

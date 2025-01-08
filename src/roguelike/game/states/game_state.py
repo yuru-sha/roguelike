@@ -1,111 +1,60 @@
 from dataclasses import dataclass
-from typing import List, Tuple, Dict, Any, Optional
-from collections import deque
+from typing import Optional, Dict, Any, List, Tuple
+from enum import Enum, auto
 
-from roguelike.core.constants import GameStates
+class GameStates(Enum):
+    """Game state enumeration."""
+    PLAYERS_TURN = auto()
+    ENEMY_TURN = auto()
+    PLAYER_DEAD = auto()
+    SHOW_INVENTORY = auto()
+    DROP_INVENTORY = auto()
+    LEVEL_UP = auto()
 
 @dataclass
-class Message:
-    """A message to be displayed in the message log."""
-    text: str
-    color: Tuple[int, int, int]
-
 class GameState:
-    """Manages the current state of the game."""
+    """
+    Represents the current state of the game.
+    """
+    dungeon_level: int = 1
+    player_has_amulet: bool = False
+    game_messages: List[Tuple[str, Tuple[int, int, int]]] = None
+    previous_player_positions: Dict[int, Tuple[int, int]] = None
+    game_won: bool = False
+    state: GameStates = GameStates.PLAYERS_TURN
     
-    def __init__(self):
-        """Initialize the game state."""
-        self.state = GameStates.PLAYERS_TURN
-        self.dungeon_level = 1
-        self.messages: deque = deque(maxlen=100)
-        self.wizard_mode = False
-        self.wizard_password = "wizard"  # Simple password for demonstration
-        
-        # Targeting state
-        self.targeting_item: Optional[int] = None
-        self.targeting_callback = None
-        self.targeting_message: Optional[str] = None
+    def __post_init__(self):
+        if self.game_messages is None:
+            self.game_messages = []
+        if self.previous_player_positions is None:
+            self.previous_player_positions = {}
     
-    def add_message(self, text: str, color: Tuple[int, int, int]) -> None:
-        """
-        Add a message to the message log.
-        
-        Args:
-            text: The message text
-            color: The color of the message
-        """
-        self.messages.append(Message(text, color))
+    def add_message(self, text: str, color: Tuple[int, int, int] = (255, 255, 255)) -> None:
+        """Add a message to the message log."""
+        self.game_messages.append((text, color))
     
-    def enter_targeting_mode(self, item: int, callback: Any, message: Optional[str] = None) -> None:
-        """
-        Enter targeting mode.
-        
-        Args:
-            item: The item being used
-            callback: Function to call when targeting is complete
-            message: Optional message to display during targeting
-        """
-        self.state = GameStates.TARGETING
-        self.targeting_item = item
-        self.targeting_callback = callback
-        self.targeting_message = message
+    def clear_messages(self) -> None:
+        """Clear all messages."""
+        self.game_messages.clear()
     
-    def exit_targeting_mode(self) -> None:
-        """Exit targeting mode."""
-        self.state = GameStates.PLAYERS_TURN
-        self.targeting_item = None
-        self.targeting_callback = None
-        self.targeting_message = None
+    def save_player_position(self, level: int, position: Tuple[int, int]) -> None:
+        """Save player's position for a specific dungeon level."""
+        self.previous_player_positions[level] = position
     
-    def toggle_wizard_mode(self, password: Optional[str] = None) -> bool:
+    def get_player_position(self, level: int) -> Optional[Tuple[int, int]]:
+        """Get player's previous position for a specific dungeon level."""
+        return self.previous_player_positions.get(level)
+    
+    def check_victory_condition(self) -> bool:
         """
-        Toggle wizard mode.
-        
-        Args:
-            password: The password to enable wizard mode
-            
-        Returns:
-            True if wizard mode was toggled successfully
+        Check if the player has won the game.
+        Victory is achieved by obtaining the Amulet of Yendor and returning to level 1.
         """
-        if not self.wizard_mode and (password == self.wizard_password or password is None):
-            self.wizard_mode = True
+        if self.player_has_amulet and self.dungeon_level == 1:
+            self.game_won = True
+            self.add_message(
+                "You have escaped the dungeon with the Amulet of Yendor! You win!",
+                (255, 255, 0)
+            )
             return True
-        elif self.wizard_mode:
-            self.wizard_mode = False
-            return True
-        return False
-    
-    def save_game(self) -> Dict[str, Any]:
-        """
-        Save the current game state.
-        
-        Returns:
-            Dictionary containing the game state
-        """
-        return {
-            'state': self.state,
-            'dungeon_level': self.dungeon_level,
-            'messages': [(m.text, m.color) for m in self.messages],
-            'wizard_mode': self.wizard_mode
-        }
-    
-    @classmethod
-    def load_game(cls, data: Dict[str, Any]) -> 'GameState':
-        """
-        Load a saved game state.
-        
-        Args:
-            data: Dictionary containing the game state
-            
-        Returns:
-            A new GameState instance with the loaded data
-        """
-        state = cls()
-        state.state = data['state']
-        state.dungeon_level = data['dungeon_level']
-        state.messages = deque(
-            [Message(text, color) for text, color in data['messages']],
-            maxlen=100
-        )
-        state.wizard_mode = data['wizard_mode']
-        return state 
+        return False 

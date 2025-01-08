@@ -1,19 +1,44 @@
-from dataclasses import dataclass, field
-import numpy as np
+from typing import Tuple, List
+from enum import Enum, auto
 
-@dataclass
+class TileType(Enum):
+    WALL = auto()
+    FLOOR = auto()
+    STAIRS_DOWN = auto()
+    STAIRS_UP = auto()
+
 class Tile:
-    """A tile in the game map."""
-    blocked: bool = True
-    block_sight: bool = True
-    explored: bool = False
-    
-    def __post_init__(self):
-        """Set block_sight to match blocked by default."""
-        if self.block_sight is None:
-            self.block_sight = self.blocked
+    """A tile on a map."""
 
-def initialize_tiles(width: int, height: int) -> np.ndarray:
+    def __init__(self, tile_type: TileType):
+        self.tile_type = tile_type
+        self.explored = False
+        self.blocked = tile_type == TileType.WALL
+        self.block_sight = tile_type == TileType.WALL
+
+    @property
+    def char(self) -> str:
+        if self.tile_type == TileType.WALL:
+            return '#'
+        elif self.tile_type == TileType.STAIRS_DOWN:
+            return '>'
+        elif self.tile_type == TileType.STAIRS_UP:
+            return '<'
+        return '.'
+
+    @property
+    def color(self) -> Tuple[int, int, int]:
+        if self.tile_type == TileType.WALL:
+            return (130, 110, 50)
+        return (200, 180, 50)
+
+    @property
+    def dark_color(self) -> Tuple[int, int, int]:
+        if self.tile_type == TileType.WALL:
+            return (0, 0, 100)
+        return (50, 50, 150)
+
+def initialize_tiles(width: int, height: int) -> List[List[Tile]]:
     """
     Initialize a 2D array of tiles.
     
@@ -24,8 +49,4 @@ def initialize_tiles(width: int, height: int) -> np.ndarray:
     Returns:
         A 2D array of tiles
     """
-    tiles = np.empty((height, width), dtype=object)
-    for y in range(height):
-        for x in range(width):
-            tiles[y][x] = Tile()
-    return tiles 
+    return [[Tile(TileType.WALL) for x in range(width)] for y in range(height)] 

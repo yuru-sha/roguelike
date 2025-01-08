@@ -3,9 +3,11 @@ The main game engine class that coordinates all game systems.
 """
 
 from typing import Dict, Any, Optional
+import sys
 import numpy as np
 import tcod
 import tcod.event
+from tcod import libtcodpy
 import esper
 
 from roguelike.core.constants import (
@@ -17,10 +19,10 @@ from roguelike.core.constants import (
 from roguelike.game.states.game_state import GameState
 from roguelike.ui.handlers.input_handler import InputHandler
 from roguelike.world.map.generator.dungeon_generator import DungeonGenerator
-from roguelike.world.entity.components.base import Position, Renderable, Fighter
+from roguelike.world.entity.components.base import Position, Renderable, Fighter, Item
 from roguelike.world.entity.prefabs.player import create_player
 from roguelike.world.spawner.spawner import populate_dungeon
-from roguelike.game.actions import Action, MovementAction, WaitAction, QuitAction
+from roguelike.world.map.tiles import TileType
 from roguelike.utils.logging import GameLogger
 
 logger = GameLogger.get_instance()
@@ -62,14 +64,334 @@ class Engine:
         # Player entity
         self.player: Optional[int] = None
         
+        # Game running flag
+        self.running = True
+        
         logger.info("Game engine initialized")
+    
+    def quit_game(self) -> None:
+        """Safely quit the game."""
+        logger.info("Quitting game")
+        self.running = False
+    
+    def cleanup(self) -> None:
+        """Clean up resources before exiting."""
+        logger.info("Cleaning up resources")
+        if self.context:
+            self.context.close()
+    
+    def _initialize_fov(self) -> None:
+        """Initialize the field of view map."""
+        if not self.player:
+            return
+            
+        player_pos = self.world.component_for_entity(self.player, Position)
+        
+        # Create transparency map
+        transparency = np.zeros((MAP_HEIGHT, MAP_WIDTH), dtype=bool)
+        for y in range(MAP_HEIGHT):
+            for x in range(MAP_WIDTH):
+                transparency[y][x] = not self.tiles[y][x].block_sight
+        
+        # Compute initial FOV
+        self.fov_map = tcod.map.compute_fov(
+            transparency=transparency,
+            pov=(player_pos.y, player_pos.x),
+            radius=TORCH_RADIUS,
+            light_walls=True,
+            algorithm=libtcodpy.FOV_BASIC
+        )
+    
+    def _recompute_fov(self) -> None:
+        """Recompute the field of view."""
+        if not self.player:
+            return
+            
+        player_pos = self.world.component_for_entity(self.player, Position)
+        
+        # Create transparency map
+        transparency = np.zeros((MAP_HEIGHT, MAP_WIDTH), dtype=bool)
+        for y in range(MAP_HEIGHT):
+            for x in range(MAP_WIDTH):
+                transparency[y][x] = not self.tiles[y][x].block_sight
+        
+        # Compute FOV
+        self.fov_map = tcod.map.compute_fov(
+            transparency=transparency,
+            pov=(player_pos.y, player_pos.x),
+            radius=TORCH_RADIUS,
+            light_walls=True,
+            algorithm=libtcodpy.FOV_BASIC
+        )
+    
+    def _render_map(self) -> None:
+        """Render the game map."""
+        if not self.fov_map is None:
+            for y in range(MAP_HEIGHT):
+                for x in range(MAP_WIDTH):
+                    visible = self.fov_map[y, x]
+                    if visible:
+                        # Tile is visible
+                        if self.tiles[y][x].tile_type == TileType.WALL:
+                            # Wall
+                            self.root_console.rgb[y, x]["ch"] = ord('#')
+                            self.root_console.rgb[y, x]["fg"] = Colors.LIGHT_WALL
+                        elif self.tiles[y][x].tile_type == TileType.STAIRS_DOWN:
+                            # Down stairs
+                            self.root_console.rgb[y, x]["ch"] = ord('>')
+                            self.root_console.rgb[y, x]["fg"] = Colors.WHITE
+                        elif self.tiles[y][x].tile_type == TileType.STAIRS_UP:
+                            # Up stairs
+                            self.root_console.rgb[y, x]["ch"] = ord('<')
+                            self.root_console.rgb[y, x]["fg"] = Colors.WHITE
+                        else:
+                            # Floor
+                            self.root_console.rgb[y, x]["ch"] = ord('.')
+                            self.root_console.rgb[y, x]["fg"] = Colors.LIGHT_GROUND
+                        self.root_console.rgb[y, x]["bg"] = (0, 0, 0)
+                        self.tiles[y][x].explored = True
+                    elif self.tiles[y][x].explored:
+                        # Tile has been explored but is not visible
+                        if self.tiles[y][x].tile_type == TileType.WALL:
+                            # Wall
+                            self.root_console.rgb[y, x]["ch"] = ord('#')
+                            self.root_console.rgb[y, x]["fg"] = Colors.DARK_WALL
+                        elif self.tiles[y][x].tile_type == TileType.STAIRS_DOWN:
+                            # Down stairs
+                            self.root_console.rgb[y, x]["ch"] = ord('>')
+                            self.root_console.rgb[y, x]["fg"] = Colors.DARK_GROUND
+                        elif self.tiles[y][x].tile_type == TileType.STAIRS_UP:
+                            # Up stairs
+                            self.root_console.rgb[y, x]["ch"] = ord('<')
+                            self.root_console.rgb[y, x]["fg"] = Colors.DARK_GROUND
+                        else:
+                            # Floor
+                            self.root_console.rgb[y, x]["ch"] = ord('.')
+                            self.root_console.rgb[y, x]["fg"] = Colors.DARK_GROUND
+                        self.root_console.rgb[y, x]["bg"] = (0, 0, 0)
+    
+    def _render_entities(self) -> None:
+        """Render all entities."""
+        # Sort entities by render order
+        entities_in_render_order = sorted(
+            self.world.get_components(Position, Renderable),
+            key=lambda x: x[1][1].render_order
+        )
+        
+        for ent, (pos, render) in entities_in_render_order:
+            if self.fov_map is not None and self.fov_map[pos.y, pos.x]:
+                self.root_console.print(
+                    y=pos.y,
+                    x=pos.x,
+                    string=render.char,
+                    fg=render.color
+                )
+    
+    def _handle_movement(self, action: Dict[str, Any]) -> None:
+        """Handle movement action."""
+        try:
+            if not self.player:
+                logger.warning("Movement attempted but no player entity exists")
+                return
+                
+            dx = action.get('dx', 0)
+            dy = action.get('dy', 0)
+            logger.debug(f"Movement attempt: dx={dx}, dy={dy}")
+            
+            player_pos = self.world.component_for_entity(self.player, Position)
+            dest_x = player_pos.x + dx
+            dest_y = player_pos.y + dy
+            logger.debug(f"Current position: ({player_pos.x}, {player_pos.y}), Target position: ({dest_x}, {dest_y})")
+            
+            # Check if destination is within bounds
+            if not (0 <= dest_x < MAP_WIDTH and 0 <= dest_y < MAP_HEIGHT):
+                logger.debug(f"Movement blocked: destination out of bounds ({dest_x}, {dest_y})")
+                return
+                
+            # Check if destination is walkable
+            if self.tiles[dest_y][dest_x].blocked or self.tiles[dest_y][dest_x].block_sight:
+                logger.debug(f"Movement blocked: destination is blocked at ({dest_x}, {dest_y})")
+                return
+                
+            # Check for combat
+            target = None
+            for ent, (pos, fighter) in self.world.get_components(Position, Fighter):
+                if ent != self.player and pos.x == dest_x and pos.y == dest_y:
+                    target = ent
+                    break
+            
+            if target is not None:
+                # Handle combat
+                attacker_fighter = self.world.component_for_entity(self.player, Fighter)
+                defender_fighter = self.world.component_for_entity(target, Fighter)
+                
+                damage = attacker_fighter.power - defender_fighter.defense
+                if damage > 0:
+                    defender_fighter.hp -= damage
+                    defender_name = self.world.component_for_entity(target, Renderable).name
+                    self.game_state.add_message(
+                        f"You attack the {defender_name} for {damage} damage!",
+                        Colors.WHITE
+                    )
+                    logger.info(f"Combat: Player dealt {damage} damage to {defender_name}")
+                    
+                    if defender_fighter.hp <= 0:
+                        self.game_state.add_message(
+                            f"The {defender_name} dies!",
+                            Colors.RED
+                        )
+                        self.world.delete_entity(target)
+                        logger.info(f"Combat: {defender_name} was defeated")
+                else:
+                    defender_name = self.world.component_for_entity(target, Renderable).name
+                    self.game_state.add_message(
+                        f"You attack the {defender_name} but do no damage!",
+                        Colors.WHITE
+                    )
+                    logger.info(f"Combat: Attack on {defender_name} did no damage")
+            else:
+                # Check for items at destination
+                for ent, (pos, item) in self.world.get_components(Position, Item):
+                    if pos.x == dest_x and pos.y == dest_y:
+                        item_name = self.world.component_for_entity(ent, Renderable).name
+                        self.game_state.add_message(
+                            f"There is {item_name} here.",
+                            Colors.LIGHT_CYAN
+                        )
+                        break
+                
+                # Move player
+                player_pos.x = dest_x
+                player_pos.y = dest_y
+                logger.debug(f"Player moved to ({dest_x}, {dest_y})")
+                self._recompute_fov()
+        except Exception as e:
+            logger.error(f"Error in movement handling: {str(e)}", exc_info=True)
+            raise
+    
+    def _handle_stairs(self, action: Dict[str, Any]) -> None:
+        """Handle stair usage action."""
+        try:
+            if not self.player:
+                logger.warning("Stair usage attempted but no player entity exists")
+                return
+                
+            direction = action.get('direction')
+            player_pos = self.world.component_for_entity(self.player, Position)
+            current_tile = self.tiles[player_pos.y][player_pos.x]
+            
+            logger.debug(f"Attempting to use stairs: direction={direction}, player_pos=({player_pos.x}, {player_pos.y})")
+            
+            if direction == 'down' and current_tile.tile_type == TileType.STAIRS_DOWN:
+                # Go down stairs
+                self.game_state.dungeon_level += 1
+                logger.info(f"Player descended to level {self.game_state.dungeon_level}")
+                self.game_state.add_message(
+                    f"You descend deeper into the dungeon (Level {self.game_state.dungeon_level}).",
+                    Colors.WHITE
+                )
+                self._change_level()
+                
+            elif direction == 'up' and current_tile.tile_type == TileType.STAIRS_UP:
+                # Go up stairs
+                if self.game_state.dungeon_level > 1:
+                    self.game_state.dungeon_level -= 1
+                    logger.info(f"Player ascended to level {self.game_state.dungeon_level}")
+                    self.game_state.add_message(
+                        f"You climb up the stairs (Level {self.game_state.dungeon_level}).",
+                        Colors.WHITE
+                    )
+                    self._change_level()
+                else:
+                    logger.info("Player attempted to leave the dungeon")
+                    if self.game_state.player_has_amulet:
+                        # Victory!
+                        self.game_state.add_message(
+                            "You escaped the dungeon with the Amulet of Yendor! You win!",
+                            Colors.YELLOW
+                        )
+                        logger.info("Player won the game!")
+                        self.game_state.game_won = True
+                        self.quit_game()
+                    else:
+                        self.game_state.add_message(
+                            "You need the Amulet of Yendor to leave the dungeon!",
+                            Colors.RED
+                        )
+            else:
+                # No stairs here
+                if direction == 'down':
+                    self.game_state.add_message(
+                        "There are no stairs down here.",
+                        Colors.YELLOW
+                    )
+                else:
+                    self.game_state.add_message(
+                        "There are no stairs up here.",
+                        Colors.YELLOW
+                    )
+                logger.debug(f"No {direction} stairs at current position")
+        
+        except Exception as e:
+            logger.error(f"Error handling stairs: {str(e)}", exc_info=True)
+            raise
+    
+    def _change_level(self) -> None:
+        """Change to a new dungeon level."""
+        try:
+            logger.info(f"Generating new level {self.game_state.dungeon_level}")
+            
+            # Clear current level
+            self.world.clear_database()
+            
+            # Generate new level
+            self.tiles, player_pos = self.dungeon_generator.generate(self.game_state.dungeon_level)
+            
+            # Create player at appropriate position
+            self.player = create_player(self.world, *player_pos)
+            
+            # Populate new level
+            populate_dungeon(self.world, self.dungeon_generator.rooms, self.game_state.dungeon_level)
+            
+            # Initialize FOV
+            self._initialize_fov()
+            
+            logger.info("Level change completed")
+        
+        except Exception as e:
+            logger.error(f"Error changing level: {str(e)}", exc_info=True)
+            raise
+    
+    def handle_action(self, action: Dict[str, Any]) -> None:
+        """Handle a game action."""
+        try:
+            action_type = action.get('action')
+            logger.debug(f"Handling action: {action_type}")
+            
+            if action_type == 'move':
+                self._handle_movement(action)
+            elif action_type == 'use_stairs':
+                self._handle_stairs(action)
+            elif action_type == 'wait':
+                logger.debug("Player waited")
+                pass  # Do nothing, just pass the turn
+            elif action_type == 'exit':
+                logger.info("Player initiated game exit")
+                self.quit_game()
+                return
+            
+            # Update FOV after any action
+            self._recompute_fov()
+        except Exception as e:
+            logger.error(f"Error handling action {action}: {str(e)}", exc_info=True)
+            raise
     
     def new_game(self) -> None:
         """Start a new game."""
         logger.info("Starting new game")
         
         # Generate first dungeon level
-        self.tiles, player_pos = self.dungeon_generator.generate()
+        self.tiles, player_pos = self.dungeon_generator.generate(self.game_state.dungeon_level)
         
         # Create player
         self.player = create_player(self.world, *player_pos)
@@ -88,473 +410,57 @@ class Engine:
         
         logger.info("New game started")
     
-    def save_game(self) -> Dict[str, Any]:
-        """
-        Save the current game state.
-        
-        Returns:
-            Dictionary containing the game state
-        """
-        logger.info("Saving game")
-        return {
-            'game_state': self.game_state.save_game(),
-            'dungeon_level': self.game_state.dungeon_level,
-            'player': self.player,
-            'tiles': self.tiles.tolist(),
-            'fov_map': self.fov_map.tolist()
-        }
-    
-    def load_game(self, data: Dict[str, Any]) -> None:
-        """
-        Load a saved game state.
-        
-        Args:
-            data: Dictionary containing the game state
-        """
-        logger.info("Loading game")
-        self.game_state = GameState.load_game(data['game_state'])
-        self.tiles = np.array(data['tiles'])
-        self.fov_map = np.array(data['fov_map'])
-        self.player = data['player']
-    
-    def update(self) -> None:
-        """Update game state for one frame."""
-        for event in tcod.event.get():
-            action = self.input_handler.handle_input(event, self.game_state.state)
-            
-            if action:
-                self._handle_action(action)
-                
-                # Handle enemy turn after player action
-                if self.game_state.state == GameStates.ENEMY_TURN:
-                    self._handle_enemy_turn()
-                    self.game_state.state = GameStates.PLAYERS_TURN
-    
-    def render(self) -> None:
-        """Render the current game state."""
-        self.root_console.clear()
-        
-        # Render map
-        self._render_map()
-        
-        # Render entities
-        self._render_entities()
-        
-        # Render UI
-        self._render_ui()
-        
-        # Present the console
-        self.context.present(self.root_console)
-    
-    def _initialize_fov(self) -> None:
-        """Initialize the field of view map."""
-        self.fov_map = np.zeros((MAP_HEIGHT, MAP_WIDTH), dtype=bool)
-        self._recompute_fov()
-    
-    def _recompute_fov(self) -> None:
-        """Recompute the field of view."""
-        if self.player is None:
-            return
-            
-        player_pos = self.world.component_for_entity(self.player, Position)
-        transparency = np.array([[not tile.block_sight for tile in row] for row in self.tiles])
-        self.fov_map = tcod.map.compute_fov(
-            transparency=transparency,
-            pov=(player_pos.y, player_pos.x),
-            radius=10,
-            light_walls=True,
-            algorithm=tcod.FOV_BASIC
-        )
-    
-    def _handle_action(self, action: Dict[str, Any]) -> None:
-        """
-        Handle a game action.
-        
-        Args:
-            action: Dictionary containing the action and its parameters
-        """
-        action_type = action.get('action')
-        
-        if action_type == 'exit':
-            raise SystemExit()
-        
-        if self.game_state.state == GameStates.PLAYERS_TURN:
-            if action_type.startswith('move'):
-                self._handle_movement(action_type)
-            elif action_type == 'pickup':
-                self._handle_pickup()
-            elif action_type == 'show_inventory':
-                self.game_state.state = GameStates.SHOW_INVENTORY
-            elif action_type == 'drop_inventory':
-                self.game_state.state = GameStates.DROP_INVENTORY
-            elif action_type == 'take_stairs':
-                self._handle_stairs()
-            elif action_type == 'wizard_mode':
-                self._handle_wizard_mode()
-    
-    def _handle_movement(self, direction: str) -> None:
-        """
-        Handle player movement.
-        
-        Args:
-            direction: Direction to move
-        """
-        if self.player is None:
-            return
-            
-        dx = dy = 0
-        
-        if direction == 'move_north':
-            dy = -1
-        elif direction == 'move_south':
-            dy = 1
-        elif direction == 'move_west':
-            dx = -1
-        elif direction == 'move_east':
-            dx = 1
-        elif direction == 'move_northwest':
-            dx, dy = -1, -1
-        elif direction == 'move_northeast':
-            dx, dy = 1, -1
-        elif direction == 'move_southwest':
-            dx, dy = -1, 1
-        elif direction == 'move_southeast':
-            dx, dy = 1, 1
-        
-        player_pos = self.world.component_for_entity(self.player, Position)
-        new_x = player_pos.x + dx
-        new_y = player_pos.y + dy
-        
-        # Check for combat
-        target = None
-        for ent, (pos, fighter) in self.world.get_components(Position, Fighter):
-            if pos.x == new_x and pos.y == new_y:
-                target = ent
-                break
-        
-        if target is not None:
-            self._handle_combat(self.player, target)
-        elif self.dungeon_generator.is_walkable(new_x, new_y):
-            player_pos.x = new_x
-            player_pos.y = new_y
-            self._recompute_fov()
-            self.game_state.state = GameStates.ENEMY_TURN
-    
-    def _handle_combat(self, attacker: int, defender: int) -> None:
-        """
-        Handle combat between two entities.
-        
-        Args:
-            attacker: The attacking entity ID
-            defender: The defending entity ID
-        """
-        attacker_fighter = self.world.component_for_entity(attacker, Fighter)
-        defender_fighter = self.world.component_for_entity(defender, Fighter)
-        
-        damage = max(0, attacker_fighter.power - defender_fighter.defense)
-        xp_gained = defender_fighter.take_damage(damage)
-        
-        if attacker == self.player:
-            self.game_state.add_message(
-                f"You hit the enemy for {damage} damage!",
-                Colors.WHITE
-            )
-            
-            if xp_gained > 0:
-                player_level = self.world.component_for_entity(self.player, Level)
-                player_level.add_xp(xp_gained)
-                self.game_state.add_message(
-                    f"You gain {xp_gained} experience points!",
-                    Colors.YELLOW
-                )
-                
-                if player_level.requires_level_up():
-                    self.game_state.state = GameStates.LEVEL_UP
-        else:
-            self.game_state.add_message(
-                f"The enemy hits you for {damage} damage!",
-                Colors.RED
-            )
-            
-            if defender_fighter.hp <= 0:
-                self.game_state.add_message(
-                    "You died!",
-                    Colors.RED
-                )
-                self.game_state.state = GameStates.PLAYER_DEAD
-    
-    def _handle_enemy_turn(self) -> None:
-        """Handle the enemy turn."""
-        for ent, (pos, fighter, ai) in self.world.get_components(Position, Fighter, AI):
-            if ent != self.player and fighter.hp > 0:
-                # Simple AI: Move towards player if visible
-                if self.fov_map[pos.y, pos.x]:
-                    player_pos = self.world.component_for_entity(self.player, Position)
-                    dx = player_pos.x - pos.x
-                    dy = player_pos.y - pos.y
-                    distance = max(abs(dx), abs(dy))
-                    
-                    if distance <= 1:
-                        self._handle_combat(ent, self.player)
-                    else:
-                        # Move towards player
-                        dx = dx // abs(dx) if dx != 0 else 0
-                        dy = dy // abs(dy) if dy != 0 else 0
-                        new_x = pos.x + dx
-                        new_y = pos.y + dy
-                        
-                        if self.dungeon_generator.is_walkable(new_x, new_y):
-                            pos.x = new_x
-                            pos.y = new_y
-    
-    def _handle_pickup(self) -> None:
-        """Handle item pickup."""
-        if self.player is None:
-            return
-            
-        player_pos = self.world.component_for_entity(self.player, Position)
-        player_inventory = self.world.component_for_entity(self.player, Inventory)
-        
-        for ent, (pos, item) in self.world.get_components(Position, Item):
-            if pos.x == player_pos.x and pos.y == player_pos.y:
-                if player_inventory.add_item(ent):
-                    self.game_state.add_message(
-                        f"You pick up the {item.name}!",
-                        Colors.GREEN
-                    )
-                    self.world.remove_component(ent, Position)
-                    break
-                else:
-                    self.game_state.add_message(
-                        "Your inventory is full!",
-                        Colors.YELLOW
-                    )
-    
-    def _handle_stairs(self) -> None:
-        """Handle taking stairs to next level."""
-        if self.player is None:
-            return
-            
-        player_pos = self.world.component_for_entity(self.player, Position)
-        stairs_pos = self.dungeon_generator.stairs_position
-        
-        if player_pos.x == stairs_pos[0] and player_pos.y == stairs_pos[1]:
-            self.game_state.dungeon_level += 1
-            self.game_state.add_message(
-                f"You descend deeper into the dungeon... (Level {self.game_state.dungeon_level})",
-                Colors.LIGHT_VIOLET
-            )
-            
-            # Generate new level
-            self.tiles, player_pos = self.dungeon_generator.generate()
-            
-            # Move player to new position
-            player_pos_comp = self.world.component_for_entity(self.player, Position)
-            player_pos_comp.x = player_pos[0]
-            player_pos_comp.y = player_pos[1]
-            
-            # Clear old entities except player
-            for ent in self.world.entities:
-                if ent != self.player:
-                    self.world.delete_entity(ent)
-            
-            # Populate new dungeon
-            populate_dungeon(self.world, self.dungeon_generator.rooms, self.game_state.dungeon_level)
-            
-            # Recompute FOV
-            self._recompute_fov()
-    
-    def _handle_wizard_mode(self) -> None:
-        """Handle toggling wizard mode."""
-        if self.game_state.toggle_wizard_mode():
-            self.game_state.add_message(
-                "Wizard mode activated!",
-                Colors.LIGHT_VIOLET
-            )
-            # Heal player and reveal map
-            if self.player is not None:
-                fighter = self.world.component_for_entity(self.player, Fighter)
-                fighter.hp = fighter.max_hp
-                self.fov_map.fill(True)
-        else:
-            self.game_state.add_message(
-                "Invalid wizard mode password!",
-                Colors.RED
-            )
-    
-    def _render_map(self) -> None:
-        """Render the game map."""
-        for y in range(MAP_HEIGHT):
-            for x in range(MAP_WIDTH):
-                visible = self.fov_map[y, x]
-                tile = self.tiles[y][x]
-                
-                if visible:
-                    if tile.blocked:
-                        self.root_console.print(x, y, "#", fg=Colors.LIGHT_WALL)
-                    else:
-                        self.root_console.print(x, y, ".", fg=Colors.LIGHT_GROUND)
-                    tile.explored = True
-                elif tile.explored:
-                    if tile.blocked:
-                        self.root_console.print(x, y, "#", fg=Colors.DARK_WALL)
-                    else:
-                        self.root_console.print(x, y, ".", fg=Colors.DARK_GROUND)
-    
-    def _render_entities(self) -> None:
-        """Render all entities."""
-        # Sort entities by render order
-        entities_in_render_order = sorted(
-            self.world.get_components(Position, Renderable),
-            key=lambda x: x[1][1].render_order
-        )
-        
-        for ent, (pos, render) in entities_in_render_order:
-            if self.fov_map[pos.y, pos.x]:
-                self.root_console.print(
-                    pos.x, pos.y,
-                    render.char,
-                    fg=render.color
-                )
-    
-    def _render_ui(self) -> None:
-        """Render the user interface."""
-        # Render player stats
-        if self.player is not None:
-            fighter = self.world.component_for_entity(self.player, Fighter)
-            level = self.world.component_for_entity(self.player, Level)
-            
-            hp_text = f"HP: {fighter.hp}/{fighter.max_hp}"
-            level_text = f"Level: {level.current_level}"
-            xp_text = f"XP: {level.current_xp}/{level.xp_to_next_level}"
-            
-            self.root_console.print(1, SCREEN_HEIGHT - 2, hp_text, fg=Colors.WHITE)
-            self.root_console.print(1, SCREEN_HEIGHT - 3, level_text, fg=Colors.WHITE)
-            self.root_console.print(1, SCREEN_HEIGHT - 4, xp_text, fg=Colors.WHITE)
-        
-        # Render messages
-        y = 1
-        for message in self.game_state.messages:
-            self.root_console.print(
-                1, y,
-                message.text,
-                fg=message.color
-            )
-            y += 1 
-    
     def run(self) -> None:
         """Run the game loop."""
         logger.info("Starting game loop")
         
-        # Start new game
-        self.new_game()
-        
-        while True:
-            # Clear the console
-            self.root_console.clear()
+        try:
+            # Start new game
+            self.new_game()
             
-            # Render the game
-            self.render()
-            
-            # Present the console
-            self.context.present(self.root_console)
-            
-            # Handle events
-            for event in tcod.event.wait():
-                action = self.input_handler.handle_input(event)
-                
-                if action:
-                    if isinstance(action, QuitAction):
-                        logger.info("Quitting game")
-                        raise SystemExit()
+            while self.running:
+                try:
+                    # Clear the console
+                    self.root_console.clear()
                     
-                    self.handle_action(action)
-    
-    def render(self) -> None:
-        """Render the game state."""
-        # Render map
-        self.render_map()
+                    # Render the game
+                    self._render_map()
+                    self._render_entities()
+                    
+                    # Present the console
+                    self.context.present(self.root_console)
+                    
+                    # Handle events
+                    for event in tcod.event.wait():
+                        try:
+                            # Convert event coordinates
+                            event = self.context.convert_event(event)
+                            
+                            # Handle window close button
+                            if isinstance(event, tcod.event.Quit):
+                                logger.info("Window close event received")
+                                self.quit_game()
+                                break
+                            
+                            action = self.input_handler.handle_input(event)
+                            logger.debug(f"Input event: {event}, resulting action: {action}")
+                            
+                            if action:
+                                self.handle_action(action)
+                                
+                                if not self.running:
+                                    break
+                        except Exception as e:
+                            logger.error(f"Error handling event {event}: {str(e)}", exc_info=True)
+                            raise
+                except Exception as e:
+                    logger.error(f"Error in game loop iteration: {str(e)}", exc_info=True)
+                    raise
         
-        # Render entities
-        self.render_entities()
+        except Exception as e:
+            logger.error(f"Fatal error in game loop: {str(e)}", exc_info=True)
+            raise
         
-        # Render UI
-        self.render_ui()
-    
-    def render_map(self) -> None:
-        """Render the game map."""
-        if self.tiles is None:
-            return
-            
-        for y in range(MAP_HEIGHT):
-            for x in range(MAP_WIDTH):
-                visible = self.fov_map[y, x]
-                if visible:
-                    self.tiles[y, x].explored = True
-                    if self.tiles[y, x].blocked:
-                        self.root_console.print(x, y, "#", fg=Colors.LIGHT_WALL)
-                    else:
-                        self.root_console.print(x, y, ".", fg=Colors.LIGHT_GROUND)
-                elif self.tiles[y, x].explored:
-                    if self.tiles[y, x].blocked:
-                        self.root_console.print(x, y, "#", fg=Colors.DARK_WALL)
-                    else:
-                        self.root_console.print(x, y, ".", fg=Colors.DARK_GROUND)
-    
-    def render_entities(self) -> None:
-        """Render all entities."""
-        for ent, (pos, rend) in self.world.get_components(Position, Renderable):
-            if self.fov_map[pos.y, pos.x]:
-                self.root_console.print(pos.x, pos.y, rend.char, fg=rend.color)
-    
-    def render_ui(self) -> None:
-        """Render the user interface."""
-        # Render HP bar
-        if self.player is not None:
-            fighter = self.world.component_for_entity(self.player, Fighter)
-            hp_text = f"HP: {fighter.hp}/{fighter.max_hp}"
-            self.root_console.print(1, SCREEN_HEIGHT - 2, hp_text, fg=Colors.WHITE)
-        
-        # Render messages
-        y = 1
-        for message in self.game_state.messages:
-            self.root_console.print(1, y, message.text, fg=message.color)
-            y += 1
-    
-    def handle_action(self, action: Action) -> None:
-        """Handle a game action."""
-        if isinstance(action, MovementAction):
-            self._handle_movement(action)
-        elif isinstance(action, WaitAction):
-            pass  # Do nothing, just pass the turn
-        
-        # Update FOV
-        self._initialize_fov()
-    
-    def _handle_movement(self, action: MovementAction) -> None:
-        """Handle movement action."""
-        if self.player is None:
-            return
-            
-        pos = self.world.component_for_entity(self.player, Position)
-        dest_x = pos.x + action.dx
-        dest_y = pos.y + action.dy
-        
-        if not self.tiles[dest_y, dest_x].blocked:
-            pos.x = dest_x
-            pos.y = dest_y
-    
-    def _initialize_fov(self) -> None:
-        """Initialize or update the field of view."""
-        if self.tiles is None or self.player is None:
-            return
-            
-        self.fov_map = np.full((MAP_HEIGHT, MAP_WIDTH), fill_value=False, dtype=bool)
-        pos = self.world.component_for_entity(self.player, Position)
-        
-        # Calculate FOV
-        for y in range(MAP_HEIGHT):
-            for x in range(MAP_WIDTH):
-                if (abs(x - pos.x) + abs(y - pos.y)) <= TORCH_RADIUS:
-                    if not self.tiles[y, x].block_sight:
-                        self.fov_map[y, x] = True 
+        finally:
+            logger.info("Cleaning up game resources")
+            self.cleanup() 

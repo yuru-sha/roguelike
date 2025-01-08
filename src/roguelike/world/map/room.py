@@ -7,20 +7,45 @@ from roguelike.world.entity.components.base import Position
 class Rect:
     """A rectangular room."""
     
-    def __init__(self, x: int, y: int, width: int, height: int):
+    def __init__(self, x: int, y: int, w: int, h: int):
         """
         Initialize the room.
         
         Args:
             x: X coordinate of top-left corner
             y: Y coordinate of top-left corner
-            width: Room width
-            height: Room height
+            w: Room width
+            h: Room height
         """
         self.x = x
         self.y = y
-        self.width = width
-        self.height = height
+        self.w = w
+        self.h = h
+        
+    @property
+    def x1(self) -> int:
+        """Left edge."""
+        return self.x
+    
+    @property
+    def y1(self) -> int:
+        """Top edge."""
+        return self.y
+    
+    @property
+    def x2(self) -> int:
+        """Right edge."""
+        return self.x + self.w
+    
+    @property
+    def y2(self) -> int:
+        """Bottom edge."""
+        return self.y + self.h
+    
+    @property
+    def center(self) -> Tuple[int, int]:
+        """Center coordinates."""
+        return (self.x + self.w // 2, self.y + self.h // 2)
     
     def intersects(self, other: 'Rect') -> bool:
         """
@@ -33,10 +58,10 @@ class Rect:
             True if the rooms intersect
         """
         return (
-            self.x <= other.x + other.width and
-            self.x + self.width >= other.x and
-            self.y <= other.y + other.height and
-            self.y + self.height >= other.y
+            self.x1 <= other.x2 and
+            self.x2 >= other.x1 and
+            self.y1 <= other.y2 and
+            self.y2 >= other.y1
         )
     
     def get_random_position(self) -> Tuple[int, int]:
@@ -46,8 +71,8 @@ class Rect:
         Returns:
             A tuple of (x, y) coordinates
         """
-        x = random.randint(self.x + 1, self.x + self.width - 1)
-        y = random.randint(self.y + 1, self.y + self.height - 1)
+        x = random.randint(self.x1 + 1, self.x2 - 1)
+        y = random.randint(self.y1 + 1, self.y2 - 1)
         return (x, y)
 
 def create_room(tiles: np.ndarray, room: Rect) -> None:
