@@ -1,9 +1,8 @@
+import random
 from typing import List, Tuple, Optional
 import numpy as np
 
-from roguelike.core.constants import (
-    MAP_WIDTH, MAP_HEIGHT, ROOM_MAX_SIZE, ROOM_MIN_SIZE, MAX_ROOMS
-)
+from roguelike.core.constants import MAP_WIDTH, MAP_HEIGHT, ROOM_MIN_SIZE, ROOM_MAX_SIZE, MAX_ROOMS
 from roguelike.world.map.room import Rect, create_room, create_h_tunnel, create_v_tunnel
 from roguelike.world.map.tiles import initialize_tiles, Tile
 from roguelike.utils.logging import GameLogger
@@ -11,24 +10,16 @@ from roguelike.utils.logging import GameLogger
 logger = GameLogger.get_instance()
 
 class DungeonGenerator:
-    """
-    Generates a dungeon level using a room-and-corridor approach.
-    """
+    """Generates dungeon levels."""
     
-    def __init__(self, width: int = MAP_WIDTH, height: int = MAP_HEIGHT):
-        """
-        Initialize the dungeon generator.
-        
-        Args:
-            width: Width of the dungeon
-            height: Height of the dungeon
-        """
-        self.width = width
-        self.height = height
-        self.tiles = initialize_tiles(width, height)
+    def __init__(self):
+        """Initialize the dungeon generator."""
+        self.width = MAP_WIDTH
+        self.height = MAP_HEIGHT
+        self.tiles = None
         self.rooms: List[Rect] = []
-        self.start_position: Optional[Tuple[int, int]] = None
-        
+        self.stairs_position: Optional[Tuple[int, int]] = None
+    
     def generate(self) -> Tuple[np.ndarray, Tuple[int, int]]:
         """
         Generate a new dungeon level.
@@ -36,67 +27,58 @@ class DungeonGenerator:
         Returns:
             Tuple of (tiles array, player starting position)
         """
-        logger.info("Generating new dungeon level...")
+        logger.info("Generating new dungeon level")
         
-        self.rooms = []
+        # Initialize tiles
         self.tiles = initialize_tiles(self.width, self.height)
+        self.rooms = []
+        player_pos = (self.width // 2, self.height // 2)  # Default position
         
-        for r in range(MAX_ROOMS):
+        # Create rooms
+        for _ in range(MAX_ROOMS):
             # Random width and height
-            w = np.random.randint(ROOM_MIN_SIZE, ROOM_MAX_SIZE)
-            h = np.random.randint(ROOM_MIN_SIZE, ROOM_MAX_SIZE)
+            w = random.randint(ROOM_MIN_SIZE, ROOM_MAX_SIZE)
+            h = random.randint(ROOM_MIN_SIZE, ROOM_MAX_SIZE)
             
-            # Random position without going out of the boundaries of the map
-            x = np.random.randint(0, self.width - w - 1)
-            y = np.random.randint(0, self.height - h - 1)
+            # Random position
+            x = random.randint(0, self.width - w - 1)
+            y = random.randint(0, self.height - h - 1)
             
-            new_room = Rect(x, y, x + w, y + h)
+            new_room = Rect(x, y, w, h)
             
-            # Check if the room intersects with existing rooms
+            # Check for intersections with other rooms
             for other_room in self.rooms:
                 if new_room.intersects(other_room):
                     break
-            else:  # No intersection found
-                # Create the room
+            else:
+                # No intersections, create the room
                 create_room(self.tiles, new_room)
                 
-                if not self.rooms:  # First room
-                    # Player starts in the first room
-                    self.start_position = new_room.center
+                if not self.rooms:
+                    # First room, place player here
+                    player_pos = new_room.get_random_position()
                 else:
-                    # Connect to the previous room
-                    prev_x, prev_y = self.rooms[-1].center
-                    curr_x, curr_y = new_room.center
+                    # Connect to previous room
+                    prev_room = self.rooms[-1]
+                    prev_pos = prev_room.get_random_position()
+                    new_pos = new_room.get_random_position()
                     
-                    # Randomly choose horizontal-then-vertical or vertical-then-horizontal
-                    if np.random.random() < 0.5:
-                        create_h_tunnel(self.tiles, prev_x, curr_x, prev_y)
-                        create_v_tunnel(self.tiles, prev_y, curr_y, curr_x)
+                    # Create tunnels
+                    if random.random() < 0.5:
+                        create_h_tunnel(self.tiles, prev_pos[0], new_pos[0], prev_pos[1])
+                        create_v_tunnel(self.tiles, prev_pos[1], new_pos[1], new_pos[0])
                     else:
-                        create_v_tunnel(self.tiles, prev_y, curr_y, prev_x)
-                        create_h_tunnel(self.tiles, prev_x, curr_x, curr_y)
+                        create_v_tunnel(self.tiles, prev_pos[1], new_pos[1], prev_pos[0])
+                        create_h_tunnel(self.tiles, prev_pos[0], new_pos[0], new_pos[1])
                 
                 self.rooms.append(new_room)
         
-        if not self.start_position:
-            raise RuntimeError("Failed to generate dungeon: no rooms created")
+        # Place stairs in last room
+        if self.rooms:
+            self.stairs_position = self.rooms[-1].get_random_position()
         
         logger.info(f"Generated dungeon with {len(self.rooms)} rooms")
-        return self.tiles, self.start_position
-    
-    def get_random_room(self) -> Rect:
-        """
-        Returns a random room from the dungeon.
-        
-        Returns:
-            A random room
-        
-        Raises:
-            RuntimeError: If no rooms exist
-        """
-        if not self.rooms:
-            raise RuntimeError("No rooms exist in the dungeon")
-        return np.random.choice(self.rooms)
+        return self.tiles, player_pos
     
     def is_walkable(self, x: int, y: int) -> bool:
         """
@@ -109,6 +91,17 @@ class DungeonGenerator:
         Returns:
             True if the position is walkable
         """
-        if 0 <= x < self.width and 0 <= y < self.height:
-            return not self.tiles[y][x].blocked
-        return False 
+        if not (0 <= x < self.width and 0 <= y < self.height):
+            return False
+        return not self.tiles[y][x].blocked
+    
+    def get_random_room(self) -> Optional[Rect]:
+        """
+        Get a random room from the dungeon.
+        
+        Returns:
+            A random room, or None if no rooms exist
+        """
+        if not self.rooms:
+            return None
+        return random.choice(self.rooms) 

@@ -1,65 +1,60 @@
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 class GameLogger:
-    _instance: Optional["GameLogger"] = None
+    """A singleton logger for the game."""
     
-    def __init__(self) -> None:
+    _instance: Optional['GameLogger'] = None
+    
+    def __init__(self):
+        """Initialize the logger."""
         if GameLogger._instance is not None:
-            raise RuntimeError("GameLogger is a singleton!")
+            raise RuntimeError("GameLogger is a singleton. Use get_instance() instead.")
         
+        # Create logs directory if it doesn't exist
+        logs_dir = Path("logs")
+        logs_dir.mkdir(exist_ok=True)
+        
+        # Configure logging
         self.logger = logging.getLogger("roguelike")
         self.logger.setLevel(logging.DEBUG)
         
-        # ログファイルの設定
-        log_dir = Path("logs")
-        log_dir.mkdir(exist_ok=True)
-        
-        # ファイルハンドラの設定
+        # File handler for all logs
         file_handler = logging.FileHandler(
-            log_dir / "game.log",
-            encoding="utf-8",
-            mode="w"
+            logs_dir / "game.log",
+            mode="w",
+            encoding="utf-8"
         )
         file_handler.setLevel(logging.DEBUG)
         file_formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
         file_handler.setFormatter(file_formatter)
+        self.logger.addHandler(file_handler)
         
-        # コンソールハンドラの設定（エラーのみ）
+        # Console handler for errors and above
         console_handler = logging.StreamHandler(sys.stderr)
         console_handler.setLevel(logging.ERROR)
         console_formatter = logging.Formatter(
             "%(levelname)s: %(message)s"
         )
         console_handler.setFormatter(console_formatter)
-        
-        self.logger.addHandler(file_handler)
         self.logger.addHandler(console_handler)
     
     @classmethod
-    def get_instance(cls) -> "GameLogger":
+    def get_instance(cls) -> logging.Logger:
+        """
+        Get the singleton instance of the logger.
+        
+        Returns:
+            The logger instance
+        """
         if cls._instance is None:
-            cls._instance = GameLogger()
-        return cls._instance
+            cls._instance = cls()
+        return cls._instance.logger
     
-    def debug(self, message: str) -> None:
-        self.logger.debug(message)
-    
-    def info(self, message: str) -> None:
-        self.logger.info(message)
-    
-    def warning(self, message: str) -> None:
-        self.logger.warning(message)
-    
-    def error(self, message: str) -> None:
-        self.logger.error(message)
-    
-    def critical(self, message: str) -> None:
-        self.logger.critical(message)
-    
-    def exception(self, message: str) -> None:
-        self.logger.exception(message) 
+    def __getattr__(self, name: str) -> Any:
+        """Delegate unknown attributes to the logger."""
+        return getattr(self.logger, name) 

@@ -1,22 +1,35 @@
 from dataclasses import dataclass
-from typing import Tuple, Optional
+from enum import Enum, auto
+from typing import Tuple, Optional, Dict, Any, Callable
+
+class RenderOrder(Enum):
+    """Render order for entities."""
+    CORPSE = auto()
+    ITEM = auto()
+    ACTOR = auto()
 
 @dataclass
 class Position:
-    """Component for entities that exist in the game world."""
+    """Position component."""
     x: int
     y: int
+    
+    def distance_to(self, other: 'Position') -> int:
+        """Calculate distance to another position."""
+        return max(abs(self.x - other.x), abs(self.y - other.y))
 
 @dataclass
 class Renderable:
-    """Component for entities that can be rendered."""
+    """Renderable component."""
     char: str
     color: Tuple[int, int, int]
-    render_order: int = 0
+    render_order: RenderOrder
+    name: str
+    always_visible: bool = False
 
 @dataclass
 class Fighter:
-    """Component for entities that can fight."""
+    """Combat stats component."""
     max_hp: int
     hp: int
     defense: int
@@ -25,84 +38,108 @@ class Fighter:
     
     def take_damage(self, amount: int) -> int:
         """
-        Deal damage to this fighter.
+        Take damage and return XP if died.
         
         Args:
-            amount: Amount of damage to deal
+            amount: Amount of damage to take
             
         Returns:
-            Amount of XP awarded for killing this fighter (0 if not killed)
+            XP value if died, 0 otherwise
         """
         self.hp = max(0, self.hp - amount)
-        if self.hp == 0:
+        if self.hp <= 0:
             return self.xp
         return 0
     
     def heal(self, amount: int) -> None:
         """
-        Heal this fighter.
+        Heal by the given amount.
         
         Args:
-            amount: Amount of HP to restore
+            amount: Amount to heal
         """
         self.hp = min(self.max_hp, self.hp + amount)
 
 @dataclass
 class AI:
-    """Component for entities that have AI behavior."""
-    pass
+    """AI behavior component."""
+    behavior: str = "basic"
+    turns_confused: int = 0
 
 @dataclass
 class Inventory:
-    """Component for entities that can carry items."""
+    """Inventory component."""
     capacity: int
     items: list = None
     
-    def __post_init__(self) -> None:
+    def __post_init__(self):
+        """Initialize items list."""
         if self.items is None:
             self.items = []
+    
+    def add_item(self, item: int) -> bool:
+        """
+        Add an item to inventory.
+        
+        Args:
+            item: Item entity ID
+            
+        Returns:
+            True if item was added
+        """
+        if len(self.items) >= self.capacity:
+            return False
+        self.items.append(item)
+        return True
+    
+    def remove_item(self, item: int) -> None:
+        """
+        Remove an item from inventory.
+        
+        Args:
+            item: Item entity ID
+        """
+        self.items.remove(item)
 
 @dataclass
 class Item:
-    """Component for entities that can be picked up and used."""
-    use_function: Optional[callable] = None
+    """Item component."""
+    name: str
+    use_function: Optional[Callable] = None
+    use_args: Optional[Dict[str, Any]] = None
     targeting: bool = False
     targeting_message: Optional[str] = None
-    consumable: bool = True
 
 @dataclass
 class Level:
-    """Component for entities that can gain experience and level up."""
+    """Level component."""
     current_level: int = 1
     current_xp: int = 0
-    level_up_base: int = 0
-    level_up_factor: int = 150
-    
-    @property
-    def experience_to_next_level(self) -> int:
-        """Returns the amount of experience needed to reach the next level."""
-        return self.level_up_base + self.current_level * self.level_up_factor
+    xp_to_next_level: int = 200
     
     def add_xp(self, xp: int) -> bool:
         """
-        Add experience points and handle leveling up.
+        Add XP and check for level up.
         
         Args:
-            xp: Amount of experience points to add
+            xp: Amount of XP to add
             
         Returns:
-            True if the entity leveled up
+            True if leveled up
         """
         self.current_xp += xp
-        
-        if self.current_xp >= self.experience_to_next_level:
-            self.current_xp -= self.experience_to_next_level
+        if self.current_xp >= self.xp_to_next_level:
             self.current_level += 1
+            self.current_xp -= self.xp_to_next_level
+            self.xp_to_next_level = int(self.xp_to_next_level * 1.5)
             return True
-            
         return False
+    
+    def requires_level_up(self) -> bool:
+        """Check if ready to level up."""
+        return self.current_xp >= self.xp_to_next_level
 
 @dataclass
 class Corpse:
-    """Component for entities that are dead and leave a corpse."""
+    """Corpse component."""
     name: str 

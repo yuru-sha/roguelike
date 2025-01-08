@@ -1,108 +1,94 @@
-from typing import Dict, Any, List, Optional, Tuple
-import numpy as np
-import esper
+from typing import List, Dict, Any, Optional
+import random
 
 from roguelike.world.map.room import Rect
-from roguelike.core.constants import MAX_MONSTERS_PER_ROOM, MAX_ITEMS_PER_ROOM
-from roguelike.world.entity.prefabs.monsters import MONSTER_CHANCES
+from roguelike.world.entity.prefabs.monsters import MONSTER_CHANCES, create_orc, create_troll
 from roguelike.world.entity.prefabs.items import ITEM_CHANCES
-from roguelike.utils.logging import GameLogger
+from roguelike.world.entity.components.base import Position, Fighter, AI, Item
 
-logger = GameLogger.get_instance()
+def get_random_choice_from_chances(chances_dict: dict, dungeon_level: int) -> Any:
+    """
+    Get a random choice from a dictionary of chances based on the dungeon level.
+    """
+    valid_choices = [
+        (choice, data)
+        for choice, data in chances_dict.items()
+        if data.get('min_level', 0) <= dungeon_level and (data.get('max_level') is None or dungeon_level <= data.get('max_level'))
+    ]
 
-def get_random_choice_from_chances(chances: Dict[str, Dict[str, Any]], dungeon_level: int) -> Optional[str]:
-    """
-    Choose a random item from the chances dictionary based on dungeon level.
-    
-    Args:
-        chances: Dictionary of chances
-        dungeon_level: Current dungeon level
-        
-    Returns:
-        The chosen item key or None if no valid choices
-    """
-    # Filter choices based on dungeon level
-    valid_choices = {
-        k: v for k, v in chances.items()
-        if (v['min_level'] <= dungeon_level and
-            (v['max_level'] is None or dungeon_level <= v['max_level']))
-    }
-    
     if not valid_choices:
         return None
-    
-    # Calculate total chance
-    total_chance = sum(item['chance'] for item in valid_choices.values())
-    
-    if total_chance == 0:
-        return None
-    
-    # Roll the dice
-    roll = np.random.randint(0, total_chance)
-    
-    # Find the chosen item
-    running_total = 0
-    for key, value in valid_choices.items():
-        running_total += value['chance']
-        if roll < running_total:
-            return key
-    
+
+    total_chance = sum(data['chance'] for _, data in valid_choices)
+    random_chance = random.randint(0, total_chance)
+
+    current_chance = 0
+    for choice, data in valid_choices:
+        current_chance += data['chance']
+        if random_chance <= current_chance:
+            return choice
+
     return None
 
-def place_monsters(world: esper.World, room: Rect, dungeon_level: int) -> None:
+def place_monsters(world: Any, room: Rect, dungeon_level: int) -> None:
     """
     Place monsters in a room.
     
     Args:
-        world: The game world
+        world: The ECS world
         room: The room to place monsters in
         dungeon_level: Current dungeon level
     """
-    number_of_monsters = np.random.randint(0, MAX_MONSTERS_PER_ROOM + 1)
+    # Get number of monsters
+    number_of_monsters = random.randint(0, 3)
     
     for _ in range(number_of_monsters):
-        x = np.random.randint(room.x1 + 1, room.x2)
-        y = np.random.randint(room.y1 + 1, room.y2)
+        # Choose random position inside the room
+        pos = room.get_random_position()
         
+        # Choose monster type
         monster_choice = get_random_choice_from_chances(MONSTER_CHANCES, dungeon_level)
         
         if monster_choice:
-            create_func = MONSTER_CHANCES[monster_choice]['create_func']
-            create_func(world, x, y)
-            logger.debug(f"Spawned {monster_choice} at ({x}, {y})")
+            # Create the monster using the creation function from MONSTER_CHANCES
+            MONSTER_CHANCES[monster_choice]['create_function'](world, pos[0], pos[1])
 
-def place_items(world: esper.World, room: Rect, dungeon_level: int) -> None:
+def place_items(world: Any, room: Rect, dungeon_level: int) -> None:
     """
     Place items in a room.
     
     Args:
-        world: The game world
+        world: The ECS world
         room: The room to place items in
         dungeon_level: Current dungeon level
     """
-    number_of_items = np.random.randint(0, MAX_ITEMS_PER_ROOM + 1)
+    # Get number of items
+    number_of_items = random.randint(0, 2)
     
     for _ in range(number_of_items):
-        x = np.random.randint(room.x1 + 1, room.x2)
-        y = np.random.randint(room.y1 + 1, room.y2)
+        # Choose random position inside the room
+        pos = room.get_random_position()
         
+        # Choose item type
         item_choice = get_random_choice_from_chances(ITEM_CHANCES, dungeon_level)
         
         if item_choice:
-            create_func = ITEM_CHANCES[item_choice]['create_func']
-            create_func(world, x, y)
-            logger.debug(f"Spawned {item_choice} at ({x}, {y})")
+            # Create the item using the creation function from ITEM_CHANCES
+            ITEM_CHANCES[item_choice]['create_function'](world, pos[0], pos[1])
 
-def populate_dungeon(world: esper.World, rooms: List[Rect], dungeon_level: int) -> None:
+def populate_dungeon(world: Any, rooms: List[Rect], dungeon_level: int) -> None:
     """
-    Populate a dungeon with monsters and items.
+    Populate the dungeon with monsters and items.
     
     Args:
-        world: The game world
-        rooms: List of rooms to populate
+        world: The ECS world
+        rooms: List of rooms in the dungeon
         dungeon_level: Current dungeon level
     """
-    # Skip the first room as it's the player's starting room
+    # Skip the first room (where the player starts)
     for room in rooms[1:]:
+        # Place monsters
         place_monsters(world, room, dungeon_level)
+        
+        # Place items
         place_items(world, room, dungeon_level) 
