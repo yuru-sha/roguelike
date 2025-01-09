@@ -1,581 +1,1228 @@
-import tcod
-import numpy as np
-import esper
-from typing import Optional, Tuple, Union
+"""
+The main game engine class that coordinates all game systems.
+"""
 
-from roguelike.world.map.dungeon import generate_dungeon
-from roguelike.world.map.game_map import GameMap
-from roguelike.world.entity.factory import EntityFactory
-from roguelike.world.entity.systems import EntitySystem
-from roguelike.world.entity.ai import AISystem
-from roguelike.world.entity.components import (
-    Position,
-    Item,
-    Name,
-    Inventory,
-    Fighter,
-    Equipment,
-    Stackable,
-    Renderable,
-)
-from roguelike.utils.logger import logger
-from roguelike.world.entity.inventory import InventorySystem
-from roguelike.world.entity.item_functions import heal, cast_lightning, cast_fireball, cast_confusion
+import os
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import esper
+import numpy as np
+import tcod
+import tcod.event
+from tcod import libtcodpy
+
+from roguelike.core.constants import (AUTO_SAVE_INTERVAL, BACKUP_ENABLED,
+                                      MAP_HEIGHT, MAP_WIDTH, MAX_BACKUP_FILES,
+                                      SAVE_VERSION, SCREEN_HEIGHT,
+                                      SCREEN_WIDTH, TORCH_RADIUS, Colors)
+from roguelike.game.states.game_state import GameState, GameStates
+from roguelike.ui.handlers.input_handler import InputHandler
+from roguelike.ui.screens.save_load_screen import SaveLoadScreen
+from roguelike.utils.logging import GameLogger
+from roguelike.utils.serialization import SaveManager
+from roguelike.world.entity.components.base import (AI, Corpse, Equipment,
+                                                    EquipmentSlots, Fighter,
+                                                    Inventory, Item, Level,
+                                                    Position, Renderable,
+                                                    RenderOrder)
+from roguelike.world.entity.prefabs.player import create_player
+from roguelike.world.map.generator.dungeon_generator import DungeonGenerator
+from roguelike.world.map.tiles import Tile, TileType
+from roguelike.world.spawner.spawner import populate_dungeon
+
+logger = GameLogger.get_instance()
+
 
 class Engine:
-    def __init__(self) -> None:
+    """
+    The main game engine class that coordinates all game systems.
+    """
+
+    def __init__(self, skip_lock_check: bool = False):
+        """Initialize the game engine."""
         logger.info("Initializing game engine")
-        # 画面レイアウト
-        self.screen_width = 80
-        self.screen_height = 50
-        
-        # 各領域のサイズ
-        self.map_width = 80
-        self.map_height = 43
-        self.status_height = 1
-        self.message_height = 5
-        
-        # メッセージ管理
-        self.messages = []
-        self.max_messages = 5
-        
-        # ECS
+
+        # Get the project root directory
+        project_root = Path(__file__).parents[3]
+        assets_path = project_root / "data" / "assets" / "dejavu10x10_gs_tc.png"
+
+        # Check for existing lock file
+        self.lock_file = project_root / ".game.lock"
+        if not skip_lock_check:
+            if self.lock_file.exists():
+                logger.error("Game is already running")
+                raise RuntimeError("Another instance of the game is already running")
+
+            # Create lock file
+            try:
+                with self.lock_file.open("w") as f:
+                    f.write(str(os.getpid()))
+                logger.info(f"Created lock file: {self.lock_file}")
+            except Exception as e:
+                logger.error(f"Failed to create lock file: {e}")
+                raise RuntimeError("Failed to create lock file")
+
+        # Initialize TCOD
+        self.root_console = tcod.console.Console(SCREEN_WIDTH, SCREEN_HEIGHT)
+        self.context = tcod.context.new(
+            columns=SCREEN_WIDTH,
+            rows=SCREEN_HEIGHT,
+            title="Roguelike",
+            tileset=tcod.tileset.load_tilesheet(
+                str(assets_path), 32, 8, tcod.tileset.CHARMAP_TCOD
+            ),
+            vsync=True,
+        )
+
+        # Disable key repeat
+        tcod.lib.SDL_StartTextInput()
+        tcod.lib.SDL_StopTextInput()
+        tcod.lib.SDL_SetHint(b"SDL_HINT_NO_SIGNAL_HANDLERS", b"1")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS", b"1")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_VIDEO_ALLOW_SCREENSAVER", b"1")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH", b"1")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_VIDEO_X11_NET_WM_PING", b"0")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_MOUSE_AUTO_CAPTURE", b"0")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_RENDER_BATCHING", b"1")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_EVENT_LOGGING", b"0")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_KEYBOARD_TEXT_EDITING", b"0")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_MOUSE_TOUCH_EVENTS", b"0")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_TOUCH_MOUSE_EVENTS", b"0")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_IDLE_TIMER_DISABLED", b"1")
+
+        # Initialize game state
+        self.game_state = GameState()
+        self.input_handler = InputHandler()
+
+        # Initialize ECS world
         self.world = esper.World()
-        self.entity_factory = EntityFactory(self.world, self)
-        self.entity_system = EntitySystem(self.world)
-        self.ai_system = AISystem(self.world, self.entity_system)
-        self.inventory_system = InventorySystem(self.world, self)
-        
-        # プレイヤー
-        self.player_entity = None
-        
-        # マップ
-        self.game_map = None
-        
-        # FOV
-        self.fov_recompute = True
-        self.visible = None
-        
-        # キーム状態
-        self.game_state = "player_turn"  # "player_turn" or "enemy_turn" or "targeting"
-        self.targeting_item = None
-        
-        # キー設定
-        self.MOVE_KEYS = {
-            # Vi keys
-            tcod.event.KeySym.h: (-1, 0),
-            tcod.event.KeySym.j: (0, 1),
-            tcod.event.KeySym.k: (0, -1),
-            tcod.event.KeySym.l: (1, 0),
-            tcod.event.KeySym.y: (-1, -1),
-            tcod.event.KeySym.u: (1, -1),
-            tcod.event.KeySym.b: (-1, 1),
-            tcod.event.KeySym.n: (1, 1),
-            # Arrow keys
-            tcod.event.KeySym.LEFT: (-1, 0),
-            tcod.event.KeySym.RIGHT: (1, 0),
-            tcod.event.KeySym.UP: (0, -1),
-            tcod.event.KeySym.DOWN: (0, 1),
-        }
-        
-        self.ACTION_KEYS = {
-            tcod.event.KeySym.ESCAPE: "quit",
-            tcod.event.KeySym.g: "pickup",  # Get item
-            tcod.event.KeySym.i: "inventory",  # Show inventory
-            tcod.event.KeySym.d: "drop",  # Drop item
-            tcod.event.KeySym.s: "split",  # Split item
+
+        # Initialize map
+        self.dungeon_generator = DungeonGenerator()
+        self.tiles: Optional[np.ndarray] = None
+        self.fov_map: Optional[np.ndarray] = None
+
+        # Player entity
+        self.player: Optional[int] = None
+
+        # Game running flag
+        self.running = True
+
+        # UI screens
+        self.save_load_screen: Optional[SaveLoadScreen] = None
+
+        # Auto-save counter
+        self.turns_since_save = 0
+
+        # Current dungeon level
+        self.dungeon_level = 1
+
+        logger.info("Game engine initialized")
+
+    def save_game(self, slot: int = 0) -> bool:
+        """
+        Save the current game state.
+
+        Args:
+            slot: Save slot number (-1 for auto-save)
+
+        Returns:
+            True if save successful, False otherwise
+        """
+        try:
+            # Prepare save data
+            tiles_data = (
+                [
+                    [tile.to_dict() if tile is not None else None for tile in row]
+                    for row in self.tiles
+                ]
+                if self.tiles is not None
+                else None
+            )
+            logger.debug(f"Tiles data: {tiles_data}")
+
+            save_data = {
+                "version": SAVE_VERSION,
+                "game_state": self.game_state.to_dict(),
+                "entities": self._serialize_entities(),
+                "tiles": tiles_data,
+                "player_id": self.player,
+                "dungeon_level": self.dungeon_level,
+                "timestamp": datetime.now().isoformat(),
+                "auto_save": slot == -1,
+            }
+
+            # Save game
+            if SaveManager.save_game(save_data, slot):
+                if slot != -1:  # 自動セーブでない場合のみメッセージを表示
+                    self.game_state.add_message("Game saved.", Colors.GREEN)
+                logger.info("Game saved successfully")
+                return True
+            else:
+                if slot != -1:  # 自動セーブでない場合のみメッセージを表示
+                    self.game_state.add_message("Failed to save game!", Colors.RED)
+                logger.error("Failed to save game")
+                return False
+
+        except Exception as e:
+            if slot != -1:  # 自動セーブでない場合のみメッセージを表示
+                self.game_state.add_message("Failed to save game!", Colors.RED)
+            logger.error(f"Error saving game: {e}")
+            return False
+
+    def _create_backup(self, slot: int) -> None:
+        """
+        Create a backup of the save file.
+
+        Args:
+            slot: Save slot number to backup
+        """
+        save_dir = SaveManager.get_save_dir()
+        save_file = save_dir / f"save_{slot}.sav"
+
+        if not save_file.exists():
+            return
+
+        # Create backup directory
+        backup_dir = save_dir / "backup"
+        backup_dir.mkdir(exist_ok=True)
+
+        # Rotate backups
+        for i in range(MAX_BACKUP_FILES - 1, 0, -1):
+            old_backup = backup_dir / f"save_{slot}.{i}.bak"
+            new_backup = backup_dir / f"save_{slot}.{i + 1}.bak"
+            if old_backup.exists():
+                old_backup.rename(new_backup)
+
+        # Create new backup
+        import shutil
+
+        backup_file = backup_dir / f"save_{slot}.1.bak"
+        shutil.copy2(save_file, backup_file)
+        logger.info(f"Created backup: {backup_file}")
+
+        # Remove oldest backup if exceeding limit
+        old_backup = backup_dir / f"save_{slot}.{MAX_BACKUP_FILES + 1}.bak"
+        if old_backup.exists():
+            old_backup.unlink()
+
+    def load_game(self, slot: int = 0) -> bool:
+        """
+        Load a saved game state.
+
+        Args:
+            slot: Save slot number (-1 for auto-save)
+
+        Returns:
+            True if load successful, False otherwise
+        """
+        try:
+            # Try to load save data
+            save_data = SaveManager.load_game(slot)
+            if not save_data:
+                # If loading fails and this is not an auto-save slot,
+                # try to load from backup
+                if slot != -1:
+                    logger.info("Attempting to load from backup...")
+                    backup_data = SaveManager.load_backup(slot)
+                    if backup_data:
+                        save_data = backup_data
+                        self.game_state.add_message(
+                            "Restored from backup save.", Colors.YELLOW
+                        )
+                    else:
+                        self.game_state.add_message("Failed to load game!", Colors.RED)
+                        logger.error("Failed to load game: No save data or backup")
+                        return False
+                else:
+                    logger.error("Failed to load auto-save")
+                    return False
+
+            # Validate version
+            if save_data.get("version") != SAVE_VERSION:
+                try:
+                    save_data = SaveManager._migrate_save_data(save_data)
+                except SaveVersionError:
+                    self.game_state.add_message(
+                        "Incompatible save version!", Colors.RED
+                    )
+                    logger.error(
+                        f"Incompatible save version: {save_data.get('version')}"
+                    )
+                    return False
+
+            try:
+                # Restore game state
+                self.game_state.from_dict(save_data["game_state"])
+
+                # Clear existing entities
+                self.world.clear_database()
+
+                # Restore entities
+                self._deserialize_entities(save_data["entities"])
+
+                # Restore tiles
+                if save_data["tiles"] is not None:
+                    from roguelike.world.map.tiles import Tile
+
+                    tiles_data = save_data["tiles"]
+                    tiles = []
+                    for row in tiles_data:
+                        tiles_row = []
+                        for tile_data in row:
+                            if tile_data is None:
+                                tiles_row.append(None)
+                            else:
+                                tiles_row.append(Tile.from_dict(tile_data))
+                        tiles.append(tiles_row)
+                    self.tiles = np.array(tiles, dtype=object)
+
+                # Restore player reference
+                self.player = save_data["player_id"]
+
+                # Restore dungeon level
+                self.dungeon_level = save_data["dungeon_level"]
+
+                # Initialize FOV map
+                self._initialize_fov()
+
+                # Update FOV
+                self._recompute_fov()
+
+                if not save_data.get("auto_save", False):
+                    self.game_state.add_message("Game loaded.", Colors.GREEN)
+                logger.info("Game loaded successfully")
+                return True
+
+            except KeyError as e:
+                self.game_state.add_message("Corrupted save data!", Colors.RED)
+                logger.error(f"Missing key in save data: {e}")
+                return False
+
+        except Exception as e:
+            self.game_state.add_message("Failed to load game!", Colors.RED)
+            logger.error(f"Error loading game: {e}")
+            return False
+
+    def _serialize_entities(self) -> Dict[int, Dict[str, Any]]:
+        """
+        Serialize all entities and their components.
+
+        Returns:
+            Dictionary mapping entity IDs to their serialized components
+        """
+        entities = {}
+        for entity in self.world._entities:
+            components = {}
+            for component_type in self.world._components:
+                if self.world.has_component(entity, component_type):
+                    component = self.world.component_for_entity(entity, component_type)
+                    components[component_type.__name__] = component.to_dict()
+            if components:
+                entities[entity] = components
+        return entities
+
+    def _deserialize_entities(self, entities_data: Dict[int, Dict[str, Any]]) -> None:
+        """
+        Restore entities from serialized data.
+
+        Args:
+            entities_data: Dictionary mapping entity IDs to their serialized components
+        """
+        from roguelike.world.entity.components.base import (AI, Corpse,
+                                                            Equipment,
+                                                            EquipmentSlots,
+                                                            Fighter, Inventory,
+                                                            Item, Level,
+                                                            Position,
+                                                            Renderable)
+
+        component_classes = {
+            "Position": Position,
+            "Renderable": Renderable,
+            "Fighter": Fighter,
+            "AI": AI,
+            "Inventory": Inventory,
+            "Item": Item,
+            "Level": Level,
+            "EquipmentSlots": EquipmentSlots,
+            "Equipment": Equipment,
+            "Corpse": Corpse,
         }
 
-    def initialize(self) -> None:
-        """ゲームの初期化"""
-        logger.info("Loading game assets")
-        
-        # フォントの設定
-        tileset = tcod.tileset.load_tilesheet(
-            "src/roguelike/assets/dejavu10x10_gs_tc.png",
-            32, 8, tcod.tileset.CHARMAP_TCOD,
-        )
-        
-        # コンソールの初期化
-        self.console = tcod.console.Console(self.screen_width, self.screen_height, order="C")
-        self.context = tcod.context.new(
-            columns=self.console.width,
-            rows=self.console.height,
-            tileset=tileset,
-            title="Roguelike",
-        )
-        
-        logger.info("Generating dungeon")
-        # ダンジョンの生成
-        self.game_map, (player_x, player_y) = generate_dungeon(
-            map_width=80,
-            map_height=43,
-            max_rooms=20,
-            room_min_size=6,
-            room_max_size=10,
-            world=self.world,
-        )
-        
-        # EntitySystemにゲームマップを設定
-        self.entity_system.set_game_map(self.game_map)
-        
-        # プレイヤーの作成
-        self.player_entity = self.entity_factory.create_player(player_x, player_y)
-        
-        # テスト用モンスターの配置
-        self.entity_factory.create_monster(player_x + 5, player_y, "orc")
-        self.entity_factory.create_monster(player_x - 5, player_y, "troll")
-        
-        # FOVの初期化
-        self.visible = np.zeros((self.game_map.height, self.game_map.width), dtype=bool)
-        
-        # Welcomeメッセージ
-        self.add_message("Hello Stranger, welcome to the Dungeons of Doom!")
-        self.add_message("Your quest is to retrieve the Amulet of Yendor.")
-        self.add_message("Press '?' for help.")
-    
-    def update(self) -> None:
-        """ゲームの状態更新"""
-        if self.game_state == "enemy_turn":
-            self.ai_system.update(self.game_map, self.player_entity)
-            self.game_state = "player_turn"
-    
-    def handle_events(self) -> bool:
-        """イベント処理"""
-        for event in tcod.event.wait():
-            # マウスイベントの変換
-            event = self.context.convert_event(event)
-            
-            # ターゲット選択中のマウスクリック
-            if self.game_state == "targeting" and isinstance(event, tcod.event.MouseButtonDown):
-                if event.button == tcod.event.MouseButton.LEFT:
-                    x, y = event.tile
-                    # マップ内かつ視界内の場合のみ
-                    if (0 <= x < self.map_width and 0 <= y < self.map_height and 
-                        self.visible[y, x]):
-                        # ターゲット位置のエンティティを取得
-                        target = None
-                        for ent in self.entity_system.get_entities_at(x, y):
-                            if self.world.has_component(ent, Fighter):
-                                target = ent
-                                break
-                        
-                        if target is not None:
-                            self.inventory_system.use_item(self.player_entity, self.targeting_item, target)
-                            self.game_state = "enemy_turn"
-                    
-                    self.targeting_item = None
-                    self.game_state = "player_turn"
-                    continue
-            
-            action = self.handle_action(event)
-            
-            if action is None:
-                continue
-            
-            if action == "quit":
-                logger.info("Quit action triggered")
-                return False
-            
-            if self.game_state == "player_turn":
-                if isinstance(action, tuple):
-                    dx, dy = action
-                    player_pos = self.world.component_for_entity(self.player_entity, Position)
-                    new_x = player_pos.x + dx
-                    new_y = player_pos.y + dy
-                    
-                    # 移動先が歩行可能な場合のみ移動
-                    if 0 <= new_x < self.map_width and 0 <= new_y < self.map_height:
-                        if self.game_map.walkable[new_y, new_x]:
-                            if self.entity_system.move_entity(self.player_entity, dx, dy):
-                                self.fov_recompute = True
-                                self.game_state = "enemy_turn"
-                
-                elif action == "pickup":
-                    # プレイヤーの位置にあるアイテムを拾う
-                    player_pos = self.world.component_for_entity(self.player_entity, Position)
-                    items = []
-                    for ent in self.entity_system.get_entities_at(player_pos.x, player_pos.y):
-                        if self.world.has_component(ent, Item):
-                            items.append(ent)
-                    
-                    if not items:
-                        self.add_message("There is nothing here to pick up.")
-                        continue
-                    
-                    item = items[-1]  # 最後のアイテム（一番上にあるもの）を拾う
-                    if self.inventory_system.add_item(self.player_entity, item):
-                        name = self.world.component_for_entity(item, Name)
-                        self.add_message(f"You pick up the {name.name}!")
-                        self.game_state = "enemy_turn"
-                
-                elif action == "inventory":
-                    self.show_inventory()
-                
-                elif action == "drop":
-                    self.show_inventory(drop=True)
-                    
-                elif action == "split":
-                    self.show_inventory(split=True)
-        
-        return True
-    
-    def handle_action(self, event) -> Optional[Union[str, Tuple[int, int]]]:
-        """イベントからアクションを決定する"""
-        if isinstance(event, tcod.event.Quit):
-            return "quit"
-        
-        if not isinstance(event, tcod.event.KeyDown):
-            return None
-            
-        # キーリピートを無視
-        if event.repeat:
-            return None
-        
-        key = event.sym
-        
-        if key in self.MOVE_KEYS:
-            return self.MOVE_KEYS[key]
-        
-        if key in self.ACTION_KEYS:
-            return self.ACTION_KEYS[key]
-        
-        return None
-    
+        for entity_id, components in entities_data.items():
+            # Create entity with specific ID
+            entity_id = int(entity_id)  # Ensure entity_id is an integer
+            self.world.create_entity(entity_id)
+
+            # Add components
+            for component_name, component_data in components.items():
+                # Get component class by name
+                component_class = component_classes.get(component_name)
+                if component_class is None:
+                    raise ValueError(f"Unknown component type: {component_name}")
+
+                # Create component instance from data
+                try:
+                    component = component_class.from_dict(component_data)
+                    self.world.add_component(entity_id, component)
+                except Exception as e:
+                    logger.error(f"Failed to deserialize {component_name}: {e}")
+                    raise
+
+    def auto_save(self) -> None:
+        """Automatically save the game to a special auto-save slot."""
+        try:
+            self.save_game(slot=-1)  # Use -1 for auto-save slot
+        except Exception as e:
+            logger.error(f"Auto-save failed: {e}", exc_info=True)
+
+    def quit_game(self) -> None:
+        """Safely quit the game."""
+        logger.info("Quitting game")
+        self.auto_save()  # Auto-save before quitting
+        self.running = False
+
     def cleanup(self) -> None:
-        """終了処理"""
-        logger.info("Cleaning up game resources")
-        self.context.close()
-    
-    def add_message(self, text: str) -> None:
-        """メッセージを追加する"""
-        self.messages.append(text)
-        if len(self.messages) > self.max_messages:
-            self.messages.pop(0)
-        logger.debug(f"Added message: {text}") 
-    
-    def render(self) -> None:
-        """画面の描画"""
-        # FOVの再計算
-        if self.fov_recompute:
-            player_pos = self.world.component_for_entity(self.player_entity, Position)
-            self.visible = self.game_map.compute_fov(player_pos.x, player_pos.y)
-            self.fov_recompute = False
-        
-        # コンソールをクリア
-        self.console.clear()
-        
-        # マップの描画
-        self.game_map.render(self.console, self.visible)
-        
-        # プレイヤー以外のエンティティを描画
-        for ent, (pos,) in self.world.get_components(Position):
-            if ent == self.player_entity:  # プレイヤーはスキップ
-                continue
-                
-            if not self.visible[pos.y, pos.x]:
-                continue
-                
-            render_data = self.entity_system.get_renderable_data(ent)
-            if render_data:
-                char, fg, bg = render_data
-                self.console.ch[pos.y, pos.x] = ord(char)
-                self.console.fg[pos.y, pos.x] = fg
-                self.console.bg[pos.y, pos.x] = bg
-        
-        # プレイヤーを最後に描画
-        player_pos = self.world.component_for_entity(self.player_entity, Position)
-        render_data = self.entity_system.get_renderable_data(self.player_entity)
-        if render_data:
-            char, fg, bg = render_data
-            self.console.ch[player_pos.y, player_pos.x] = ord(char)
-            self.console.fg[player_pos.y, player_pos.x] = fg
-            self.console.bg[player_pos.y, player_pos.x] = bg
-        
-        # ステータス情報の表示
-        status_y = self.map_height
-        fighter = self.entity_system.get_fighter_data(self.player_entity)
-        status_text = f"HP: {fighter.hp}/{fighter.max_hp}  Floor: 1  Turn: 0"
-        self.console.print(x=0, y=status_y, string=status_text, fg=(255, 255, 255))
-        
-        # メッセージの表示
-        message_y = status_y + self.status_height
-        for i, message in enumerate(self.messages[-self.message_height:]):
-            self.console.print(x=0, y=message_y + i, string=message, fg=(255, 255, 255))
-        
-        # 画面の更新
-        self.context.present(self.console) 
-    
-    def show_inventory(self, drop: bool = False, split: bool = False) -> None:
-        """インベントリを表示"""
-        if not self.world.has_component(self.player_entity, Inventory):
+        """Clean up resources before exiting."""
+        logger.info("Cleaning up resources")
+
+        # Remove lock file
+        try:
+            if self.lock_file.exists():
+                self.lock_file.unlink()
+                logger.info("Removed lock file")
+        except Exception as e:
+            logger.error(f"Failed to remove lock file: {e}")
+
+        if self.context:
+            self.context.close()
+
+    def _initialize_fov(self) -> None:
+        """Initialize the field of view map."""
+        if not self.player:
             return
-            
-        inventory = self.world.component_for_entity(self.player_entity, Inventory)
-        
-        if not inventory.items:
-            self.add_message("Your inventory is empty.")
+
+        player_pos = self.world.component_for_entity(self.player, Position)
+
+        # Create transparency map
+        transparency = np.zeros((MAP_HEIGHT, MAP_WIDTH), dtype=bool)
+        for y in range(MAP_HEIGHT):
+            for x in range(MAP_WIDTH):
+                transparency[y][x] = not self.tiles[y][x].block_sight
+
+        # Compute initial FOV
+        self.fov_map = tcod.map.compute_fov(
+            transparency=transparency,
+            pov=(player_pos.y, player_pos.x),
+            radius=TORCH_RADIUS,
+            light_walls=True,
+            algorithm=libtcodpy.FOV_BASIC,
+        )
+
+    def _recompute_fov(self) -> None:
+        """Recompute the field of view."""
+        if not self.player:
             return
-        
-        # インベントリウィンドウの設定
-        window_width = 50
-        window_height = len(inventory.items) + 2
-        window_x = self.screen_width // 2 - window_width // 2
-        window_y = self.screen_height // 2 - window_height // 2
-        
-        # 選択中のアイテムインデックス
-        selected_index = 0
-        
-        while True:
-            # ウィンドウの描画
-            window = tcod.console.Console(window_width, window_height, order="F")
-            window.draw_frame(
-                x=0,
-                y=0,
-                width=window_width,
-                height=window_height,
-                title="Inventory",
-                clear=True,
-                fg=(255, 255, 255),
-                bg=(0, 0, 0),
+
+        player_pos = self.world.component_for_entity(self.player, Position)
+
+        # Create transparency map
+        transparency = np.zeros((MAP_HEIGHT, MAP_WIDTH), dtype=bool)
+        for y in range(MAP_HEIGHT):
+            for x in range(MAP_WIDTH):
+                transparency[y][x] = not self.tiles[y][x].block_sight
+
+        # Compute FOV
+        self.fov_map = tcod.map.compute_fov(
+            transparency=transparency,
+            pov=(player_pos.y, player_pos.x),
+            radius=TORCH_RADIUS,
+            light_walls=True,
+            algorithm=libtcodpy.FOV_BASIC,
+        )
+
+    def _render_map(self) -> None:
+        """Render the game map."""
+        if not self.fov_map is None:
+            for y in range(MAP_HEIGHT):
+                for x in range(MAP_WIDTH):
+                    visible = self.fov_map[y, x]
+                    if visible:
+                        # Tile is visible
+                        if self.tiles[y][x].tile_type == TileType.WALL:
+                            # Wall
+                            self.root_console.rgb[y, x]["ch"] = ord("#")
+                            self.root_console.rgb[y, x]["fg"] = Colors.LIGHT_WALL
+                        elif self.tiles[y][x].tile_type == TileType.STAIRS_DOWN:
+                            # Down stairs
+                            self.root_console.rgb[y, x]["ch"] = ord(">")
+                            self.root_console.rgb[y, x]["fg"] = Colors.WHITE
+                        elif self.tiles[y][x].tile_type == TileType.STAIRS_UP:
+                            # Up stairs
+                            self.root_console.rgb[y, x]["ch"] = ord("<")
+                            self.root_console.rgb[y, x]["fg"] = Colors.WHITE
+                        else:
+                            # Floor
+                            self.root_console.rgb[y, x]["ch"] = ord(".")
+                            self.root_console.rgb[y, x]["fg"] = Colors.LIGHT_GROUND
+                        self.root_console.rgb[y, x]["bg"] = (0, 0, 0)
+                        self.tiles[y][x].explored = True
+                    elif self.tiles[y][x].explored:
+                        # Tile has been explored but is not visible
+                        if self.tiles[y][x].tile_type == TileType.WALL:
+                            # Wall
+                            self.root_console.rgb[y, x]["ch"] = ord("#")
+                            self.root_console.rgb[y, x]["fg"] = Colors.DARK_WALL
+                        elif self.tiles[y][x].tile_type == TileType.STAIRS_DOWN:
+                            # Down stairs
+                            self.root_console.rgb[y, x]["ch"] = ord(">")
+                            self.root_console.rgb[y, x]["fg"] = Colors.DARK_GROUND
+                        elif self.tiles[y][x].tile_type == TileType.STAIRS_UP:
+                            # Up stairs
+                            self.root_console.rgb[y, x]["ch"] = ord("<")
+                            self.root_console.rgb[y, x]["fg"] = Colors.DARK_GROUND
+                        else:
+                            # Floor
+                            self.root_console.rgb[y, x]["ch"] = ord(".")
+                            self.root_console.rgb[y, x]["fg"] = Colors.DARK_GROUND
+                        self.root_console.rgb[y, x]["bg"] = (0, 0, 0)
+
+    def _render_entities(self) -> None:
+        """Render all entities."""
+        # Sort entities by render order
+        entities_in_render_order = sorted(
+            self.world.get_components(Position, Renderable),
+            key=lambda x: x[1][1].render_order,
+        )
+
+        logger.debug(f"Rendering {len(entities_in_render_order)} entities")
+
+        for ent, (pos, render) in entities_in_render_order:
+            # 死体は探索済みの領域では常に表示
+            is_corpse = self.world.has_component(ent, Corpse)
+            if is_corpse:
+                logger.debug(f"Found corpse at ({pos.x}, {pos.y}): {render.name}")
+
+            # 視界内か、死体かつ探索済みの場合に表示
+            visible = self.fov_map[pos.y, pos.x] if self.fov_map is not None else False
+            explored = (
+                self.tiles[pos.y][pos.x].explored if self.tiles is not None else False
             )
-            
-            # アイテム一覧の表示
-            for i, item in enumerate(inventory.items):
-                name = self.world.component_for_entity(item, Name)
-                key = chr(ord('a') + i)
-                
-                # アイテムの詳細情報を取得
-                details = []
-                
-                # 重ね置き可能なアイテムの場合は個数を表示
-                is_stackable = False
-                if (self.world.has_component(item, Item) and 
-                    self.world.component_for_entity(item, Item).stackable):
-                    stack = self.world.component_for_entity(item, Stackable)
-                    details.append(f"x{stack.count}")
-                    is_stackable = True
-                
-                # 装備品の場合
-                if self.world.has_component(item, Equipment):
-                    equipment = self.world.component_for_entity(item, Equipment)
-                    if equipment.power_bonus != 0:
-                        details.append(f"Power +{equipment.power_bonus}")
-                    if equipment.defense_bonus != 0:
-                        details.append(f"Defense +{equipment.defense_bonus}")
-                    if equipment.is_equipped:
-                        details.append("(equipped)")
-                
-                # 使用可能アイテムの場合
-                if self.world.has_component(item, Item):
-                    item_component = self.world.component_for_entity(item, Item)
-                    if "amount" in item_component.function_kwargs:
-                        details.append(f"Heals {item_component.function_kwargs['amount']} HP")
-                    elif "damage" in item_component.function_kwargs:
-                        details.append(f"Deals {item_component.function_kwargs['damage']} damage")
-                
-                # 詳細情報を結合
-                detail_text = ", ".join(details)
-                if detail_text:
-                    text = f"{key}) {name.name:<15} - {detail_text}"
-                else:
-                    text = f"{key}) {name.name}"
-                
-                # 選択中のアイテムは強調表示
-                # 分割モードでは、スタック可能なアイテムのみ強調表示
-                if split and not is_stackable:
-                    color = (64, 64, 64)  # 分割不可能なアイテムは暗く表示
-                else:
-                    color = (255, 255, 255) if i == selected_index else (128, 128, 128)
-                window.print(x=1, y=i+1, string=text, fg=color)
-            
-            # 操作説明を表示
-            action = "drop" if drop else "split" if split else "use"
-            help_text = f"↑↓: Select  Enter: {action.capitalize()}  Esc: Cancel"
-            window.print(x=1, y=window_height-1, string=help_text)
-            
-            # メインコンソールにウィンドウを合成
-            window.blit(
-                dest=self.console,
-                dest_x=window_x,
-                dest_y=window_y,
-                src_x=0,
-                src_y=0,
-                width=window_width,
-                height=window_height,
-                fg_alpha=1.0,
-                bg_alpha=0.7,
+
+            if visible or (is_corpse and explored):
+                # 色の決定
+                color = render.color
+                if not visible:
+                    color = Colors.DARK_GRAY
+                elif is_corpse:
+                    color = Colors.RED
+
+                # エンティティの描画
+                self.root_console.print(y=pos.y, x=pos.x, string=render.char, fg=color)
+
+                if is_corpse:
+                    logger.debug(
+                        f"Rendered corpse at ({pos.x}, {pos.y}) with char '{render.char}' and color {color}"
+                    )
+
+    def _handle_movement(self, action: Dict[str, Any]) -> None:
+        """Handle movement action."""
+        try:
+            dx = action.get("dx", 0)
+            dy = action.get("dy", 0)
+
+            player_pos = self.world.component_for_entity(self.player, Position)
+            dest_x = player_pos.x + dx
+            dest_y = player_pos.y + dy
+
+            logger.debug(
+                f"Player (ID: {self.player}) at ({player_pos.x}, {player_pos.y}) attempting to move to ({dest_x}, {dest_y})"
             )
-            
-            # 画面の更新
-            self.context.present(self.console)
-            
-            # キー入力待ち
-            for event in tcod.event.wait():
-                if not isinstance(event, tcod.event.KeyDown):
-                    continue
-                    
-                # ESCキーでキャンセル
-                if event.sym == tcod.event.KeySym.ESCAPE:
-                    return
-                
-                # 上下キーで選択移動
-                elif event.sym == tcod.event.KeySym.UP:
-                    selected_index = (selected_index - 1) % len(inventory.items)
-                    break
-                elif event.sym == tcod.event.KeySym.DOWN:
-                    selected_index = (selected_index + 1) % len(inventory.items)
-                    break
-                
-                # Enterキーでアイテム使用/ドロップ/分割
-                elif event.sym == tcod.event.KeySym.RETURN:
-                    selected_item = inventory.items[selected_index]
-                    
-                    # 分割モードの場合
-                    if split:
-                        if (self.world.has_component(selected_item, Item) and 
-                            self.world.component_for_entity(selected_item, Item).stackable):
-                            stack = self.world.component_for_entity(selected_item, Stackable)
-                            name = self.world.component_for_entity(selected_item, Name).name
-                            if stack.count > 1:
-                                # 数量選択画面を表示
-                                quantity = self.show_quantity_selector(
-                                    title="Split Stack",
-                                    max_quantity=stack.count - 1
-                                )
-                                if quantity:
-                                    self.inventory_system.split_item(
-                                        self.player_entity,
-                                        selected_item,
-                                        quantity
+
+            # Check if destination is within bounds
+            if not (0 <= dest_x < MAP_WIDTH and 0 <= dest_y < MAP_HEIGHT):
+                return
+
+            # First check for entities at destination
+            for ent, (pos, fighter) in self.world.get_components(Position, Fighter):
+                if pos.x == dest_x and pos.y == dest_y:
+                    # Attack!
+                    target_name = self.world.component_for_entity(ent, Renderable).name
+                    logger.debug(
+                        f"Found enemy {target_name} (ID: {ent}) at ({pos.x}, {pos.y})"
+                    )
+                    damage = self._calculate_damage(self.player, ent)
+
+                    if damage > 0:
+                        self.game_state.add_message(
+                            f"You attack {target_name} for {damage} damage!",
+                            Colors.PLAYER_ATK,
+                        )
+                        xp = fighter.take_damage(damage)
+                        logger.debug(
+                            f"Dealt {damage} damage to {target_name} (ID: {ent}), HP remaining: {fighter.hp}"
+                        )
+                        # Check if enemy died
+                        if fighter.hp <= 0:
+                            self.game_state.add_message(
+                                f"{target_name} dies!", Colors.ENEMY_DIE
+                            )
+                            self._handle_enemy_death(ent, xp)
+                            # 敵が死亡したら、その位置にある他の敵エンティティを削除
+                            for other_ent, (other_pos, _) in self.world.get_components(
+                                Position, Fighter
+                            ):
+                                if (
+                                    other_ent != ent
+                                    and other_pos.x == pos.x
+                                    and other_pos.y == pos.y
+                                ):
+                                    logger.debug(
+                                        f"Removing duplicate enemy at ({other_pos.x}, {other_pos.y})"
                                     )
-                                    self.add_message(f"You split off {quantity} {name}s.")
-                                    self.game_state = "enemy_turn"
-                    # ドロップモードの場合
-                    elif drop:
-                        if (self.world.has_component(selected_item, Item) and 
-                            self.world.component_for_entity(selected_item, Item).stackable):
-                            stack = self.world.component_for_entity(selected_item, Stackable)
-                            name = self.world.component_for_entity(selected_item, Name).name
-                            if stack.count > 1:
-                                # 数量選択画面を表示
-                                quantity = self.show_quantity_selector(
-                                    title="Drop How Many?",
-                                    max_quantity=stack.count
-                                )
-                                if quantity:
-                                    new_item = self.inventory_system.remove_item(self.player_entity, selected_item, quantity)
-                                    if new_item:
-                                        # ドロップしたアイテムをプレイヤーの位置に配置
-                                        player_pos = self.world.component_for_entity(self.player_entity, Position)
-                                        self.world.add_component(new_item, Position(x=player_pos.x, y=player_pos.y))
-                                        self.add_message(f"You drop {quantity} {name}s.")
-                                        self.game_state = "enemy_turn"
-                            else:
-                                if self.inventory_system.remove_item(self.player_entity, selected_item):
-                                    # ドロップしたアイテムをプレイヤーの位置に配置
-                                    player_pos = self.world.component_for_entity(self.player_entity, Position)
-                                    self.world.add_component(selected_item, Position(x=player_pos.x, y=player_pos.y))
-                                    self.add_message(f"You drop {name}.")
-                                    self.game_state = "enemy_turn"
-                        else:
-                            name = self.world.component_for_entity(selected_item, Name).name
-                            if self.inventory_system.remove_item(self.player_entity, selected_item):
-                                # ドロップしたアイテムをプレイヤーの位置に配置
-                                player_pos = self.world.component_for_entity(self.player_entity, Position)
-                                self.world.add_component(selected_item, Position(x=player_pos.x, y=player_pos.y))
-                                self.add_message(f"You drop {name}.")
-                                self.game_state = "enemy_turn"
-                    # 使用モードの場合
+                                    self.world.delete_entity(other_ent)
                     else:
-                        item_component = self.world.component_for_entity(selected_item, Item)
-                        if item_component.targeting:
-                            self.targeting_item = selected_item
-                            self.game_state = "targeting"
-                            self.add_message(item_component.targeting_message or "Left-click a target tile.")
-                        else:
-                            if (item_component.stackable and 
-                                self.world.component_for_entity(selected_item, Stackable).count > 1):
-                                # 数量選択画面を表示
-                                quantity = self.show_quantity_selector(
-                                    title="Use How Many?",
-                                    max_quantity=self.world.component_for_entity(selected_item, Stackable).count
-                                )
-                                if quantity:
-                                    for _ in range(quantity):
-                                        if not self.inventory_system.use_item(self.player_entity, selected_item):
-                                            break
-                            else:
-                                if self.inventory_system.use_item(self.player_entity, selected_item):
-                                    self.game_state = "enemy_turn"
-                    return 
-    
-    def show_quantity_selector(self, title: str, max_quantity: int) -> Optional[int]:
-        """数量選択画面を表示"""
-        window_width = 30
-        window_height = 5
-        window_x = self.screen_width // 2 - window_width // 2
-        window_y = self.screen_height // 2 - window_height // 2
-        
-        current_quantity = 1
-        
-        while True:
-            # ウィンドウの描画
-            window = tcod.console.Console(window_width, window_height, order="F")
-            window.draw_frame(
-                x=0,
-                y=0,
-                width=window_width,
-                height=window_height,
-                title=title,
-                clear=True,
-                fg=(255, 255, 255),
-                bg=(0, 0, 0),
+                        self.game_state.add_message(
+                            f"You attack {target_name} but do no damage!",
+                            Colors.PLAYER_ATK,
+                        )
+                    return
+
+            # Then check if tile is blocked
+            if self.tiles[dest_y][dest_x].blocked:
+                logger.debug(f"Movement blocked by terrain at ({dest_x}, {dest_y})")
+                return
+
+            # Check for corpses at destination
+            for ent, (pos, _) in self.world.get_components(Position, Corpse):
+                if pos.x == dest_x and pos.y == dest_y:
+                    # コープスの上を移動できる
+                    logger.debug(f"Moving over corpse at ({pos.x}, {pos.y})")
+                    player_pos.x = dest_x
+                    player_pos.y = dest_y
+                    logger.debug(
+                        f"Player (ID: {self.player}) moved to ({player_pos.x}, {player_pos.y})"
+                    )
+                    return
+
+            # Move player
+            player_pos.x = dest_x
+            player_pos.y = dest_y
+            logger.debug(
+                f"Player (ID: {self.player}) moved to ({player_pos.x}, {player_pos.y})"
             )
-            
-            # 数量表示
-            quantity_text = f"Quantity: {current_quantity}"
-            x = window_width // 2 - len(quantity_text) // 2
-            window.print(x=x, y=1, string=quantity_text)
-            
-            # 操作説明
-            help_text = "↑↓: Adjust  Enter: OK  Esc: Cancel"
-            x = window_width // 2 - len(help_text) // 2
-            window.print(x=x, y=3, string=help_text)
-            
-            # メインコンソールにウィンドウを合成
-            window.blit(
-                dest=self.console,
-                dest_x=window_x,
-                dest_y=window_y,
-                src_x=0,
-                src_y=0,
-                width=window_width,
-                height=window_height,
-                fg_alpha=1.0,
-                bg_alpha=0.7,
+
+        except Exception as e:
+            logger.error(f"Error handling movement: {str(e)}", exc_info=True)
+            raise
+
+    def _handle_stairs(self, action: Dict[str, Any]) -> None:
+        """Handle stair usage action."""
+        try:
+            if not self.player:
+                logger.warning("Stair usage attempted but no player entity exists")
+                return
+
+            direction = action.get("direction")
+            player_pos = self.world.component_for_entity(self.player, Position)
+            current_tile = self.tiles[player_pos.y][player_pos.x]
+
+            logger.debug(
+                f"Attempting to use stairs: direction={direction}, player_pos=({player_pos.x}, {player_pos.y})"
             )
-            
-            # 画面の更新
-            self.context.present(self.console)
-            
-            # キー入力待ち
-            for event in tcod.event.wait():
-                if not isinstance(event, tcod.event.KeyDown):
-                    continue
-                    
-                # ESCキーでキャンセル
-                if event.sym == tcod.event.KeySym.ESCAPE:
-                    return None
-                
-                # 上下キーで数量調整
-                elif event.sym == tcod.event.KeySym.UP:
-                    current_quantity = min(current_quantity + 1, max_quantity)
+            logger.debug(f"Current tile type: {current_tile.tile_type}")
+
+            if direction == "down" and current_tile.tile_type == TileType.STAIRS_DOWN:
+                logger.debug("Found down stairs, descending...")
+                # Go down stairs
+                self.game_state.dungeon_level += 1
+                logger.info(
+                    f"Player descended to level {self.game_state.dungeon_level}"
+                )
+                self.game_state.add_message(
+                    f"You descend deeper into the dungeon (Level {self.game_state.dungeon_level}).",
+                    Colors.WHITE,
+                )
+                self._change_level()
+
+            elif direction == "up" and current_tile.tile_type == TileType.STAIRS_UP:
+                logger.debug("Found up stairs, ascending...")
+                # Go up stairs
+                if self.game_state.dungeon_level > 1:
+                    self.game_state.dungeon_level -= 1
+                    logger.info(
+                        f"Player ascended to level {self.game_state.dungeon_level}"
+                    )
+                    self.game_state.add_message(
+                        f"You climb up the stairs (Level {self.game_state.dungeon_level}).",
+                        Colors.WHITE,
+                    )
+                    self._change_level()
+                else:
+                    logger.info("Player attempted to leave the dungeon")
+                    if self.game_state.player_has_amulet:
+                        # Victory!
+                        self.game_state.add_message(
+                            "You escaped the dungeon with the Amulet of Yendor! You win!",
+                            Colors.YELLOW,
+                        )
+                        logger.info("Player won the game!")
+                        self.game_state.game_won = True
+                        self.quit_game()
+                    else:
+                        self.game_state.add_message(
+                            "You need the Amulet of Yendor to leave the dungeon!",
+                            Colors.RED,
+                        )
+            else:
+                # No stairs here
+                if direction == "down":
+                    self.game_state.add_message(
+                        "There are no stairs down here.", Colors.YELLOW
+                    )
+                else:
+                    self.game_state.add_message(
+                        "There are no stairs up here.", Colors.YELLOW
+                    )
+                logger.debug(
+                    f"No {direction} stairs at current position. Current tile type: {current_tile.tile_type}"
+                )
+
+        except Exception as e:
+            logger.error(f"Error handling stairs: {str(e)}", exc_info=True)
+            raise
+
+    def _change_level(self) -> None:
+        """Change to a new dungeon level."""
+        try:
+            logger.info(f"Generating new level {self.game_state.dungeon_level}")
+
+            # Clear current level
+            self.world.clear_database()
+
+            # Generate new level
+            self.tiles, player_pos = self.dungeon_generator.generate(
+                self.game_state.dungeon_level
+            )
+
+            # Create player at appropriate position
+            self.player = create_player(self.world, *player_pos)
+
+            # Populate new level
+            populate_dungeon(
+                self.world, self.dungeon_generator.rooms, self.game_state.dungeon_level
+            )
+
+            # Initialize FOV
+            self._initialize_fov()
+
+            logger.info("Level change completed")
+
+        except Exception as e:
+            logger.error(f"Error changing level: {str(e)}", exc_info=True)
+            raise
+
+    def _handle_pickup(self) -> None:
+        """Handle picking up an item."""
+        try:
+            player_pos = self.world.component_for_entity(self.player, Position)
+            player_inventory = self.world.component_for_entity(self.player, Inventory)
+
+            # Find items at player's position
+            items_found = False
+            for ent, (pos, _) in self.world.get_components(Position, Item):
+                if pos.x == player_pos.x and pos.y == player_pos.y:
+                    items_found = True
+                    # Check if inventory is full
+                    slot = player_inventory.add_item(ent)
+                    if slot is None:
+                        item_name = self.world.component_for_entity(
+                            ent, Renderable
+                        ).name
+                        self.game_state.add_message(
+                            f"Your inventory is full, cannot pick up {item_name}!",
+                            Colors.RED,
+                        )
+                        logger.info(f"Pickup failed: inventory full, item={item_name}")
+                    else:
+                        # Add item to inventory and remove from map
+                        item_name = self.world.component_for_entity(
+                            ent, Renderable
+                        ).name
+                        self.world.remove_component(ent, Position)  # Remove from map
+                        self.game_state.add_message(
+                            f"You pick up the {item_name}!", Colors.GREEN
+                        )
+                        logger.info(f"Picked up item: {item_name}, slot={slot}")
                     break
-                elif event.sym == tcod.event.KeySym.DOWN:
-                    current_quantity = max(current_quantity - 1, 1)
-                    break
-                
-                # Enterキーで決定
-                elif event.sym == tcod.event.KeySym.RETURN:
-                    return current_quantity 
+
+            if not items_found:
+                self.game_state.add_message(
+                    "There is nothing here to pick up.", Colors.YELLOW
+                )
+                logger.debug("No items found at player position")
+        except Exception as e:
+            logger.error(f"Error in pickup handling: {e}", exc_info=True)
+            raise
+
+    def handle_action(self, action: Dict[str, Any]) -> None:
+        """Handle a game action."""
+        try:
+            action_type = action.get("action")
+            logger.debug(f"Handling action: {action_type}")
+
+            if action_type == "move":
+                self._handle_movement(action)
+                self._check_auto_save()
+            elif action_type == "use_stairs":
+                self._handle_stairs(action)
+                self._check_auto_save()
+            elif action_type == "wait":
+                logger.debug("Player waited")
+                self._check_auto_save()
+                pass  # Do nothing, just pass the turn
+            elif action_type == "pickup":
+                self._handle_pickup()
+                self._check_auto_save()
+            elif action_type == "exit":
+                if self.game_state.state in (
+                    GameStates.SAVE_GAME,
+                    GameStates.LOAD_GAME,
+                ):
+                    self.game_state.state = GameStates.PLAYERS_TURN
+                    self.save_load_screen = None
+                else:
+                    logger.info("Player initiated game exit")
+                    self.quit_game()
+                    return
+            elif action_type == "save_game":
+                self.game_state.state = GameStates.SAVE_GAME
+                self.save_load_screen = SaveLoadScreen(self.root_console, is_save=True)
+                self.game_state.add_message(
+                    "Select a slot to save the game (0-9)", Colors.WHITE
+                )
+            elif action_type == "load_game":
+                self.game_state.state = GameStates.LOAD_GAME
+                self.save_load_screen = SaveLoadScreen(self.root_console, is_save=False)
+                self.game_state.add_message(
+                    "Select a slot to load the game (0-9)", Colors.WHITE
+                )
+            elif action_type == "select" and self.save_load_screen:
+                if self.game_state.state == GameStates.SAVE_GAME:
+                    self.save_game(self.save_load_screen.selected_slot)
+                    self.game_state.state = GameStates.PLAYERS_TURN
+                    self.save_load_screen = None
+                elif self.game_state.state == GameStates.LOAD_GAME:
+                    if self.load_game(self.save_load_screen.selected_slot):
+                        self.game_state.add_message(
+                            f"Game loaded from slot {self.save_load_screen.selected_slot}",
+                            Colors.GREEN,
+                        )
+                        self.game_state.state = GameStates.PLAYERS_TURN
+                        self.save_load_screen = None
+                    else:
+                        self.game_state.add_message("Failed to load game", Colors.RED)
+            elif action_type == "move_cursor" and self.save_load_screen:
+                dy = action.get("dy", 0)
+                if dy < 0:
+                    self.save_load_screen.selected_slot = max(
+                        0, self.save_load_screen.selected_slot - 1
+                    )
+                elif dy > 0:
+                    self.save_load_screen.selected_slot = min(
+                        9, self.save_load_screen.selected_slot + 1
+                    )
+
+            # Update FOV after any action
+            self._recompute_fov()
+        except Exception as e:
+            logger.error(f"Error handling action {action}: {str(e)}", exc_info=True)
+            raise
+
+    def _check_auto_save(self) -> None:
+        """Check if auto-save should be performed."""
+        try:
+            auto_save_interval = self.game_state.auto_save_interval
+            if auto_save_interval <= 0:
+                return
+
+            self.turns_since_save += 1
+            if self.turns_since_save >= auto_save_interval:
+                logger.info("Performing auto-save...")
+                if self.save_game(slot=-1):  # Use special slot for auto-save
+                    self.turns_since_save = 0
+                    logger.info("Auto-save completed")
+                else:
+                    logger.error("Auto-save failed")
+
+        except Exception as e:
+            logger.error(f"Error in auto-save check: {e}")
+
+    def new_game(self) -> None:
+        """Start a new game."""
+        logger.info("Starting new game")
+
+        # Generate first dungeon level
+        self.tiles, player_pos = self.dungeon_generator.generate(
+            self.game_state.dungeon_level
+        )
+
+        # Create player
+        self.player = create_player(self.world, *player_pos)
+
+        # Populate dungeon
+        populate_dungeon(
+            self.world, self.dungeon_generator.rooms, self.game_state.dungeon_level
+        )
+
+        # Initialize FOV
+        self._initialize_fov()
+
+        # Add welcome message
+        self.game_state.add_message(
+            "Welcome to the Roguelike! Prepare to die...", Colors.WHITE
+        )
+
+        logger.info("New game started")
+
+    def run(self) -> None:
+        """Run the game loop."""
+        logger.info("Starting game loop")
+
+        try:
+            # Start new game
+            self.new_game()
+
+            while self.running:
+                try:
+                    # Clear the console
+                    self.root_console.clear()
+
+                    # Render the game
+                    self._render_map()
+                    self._render_entities()
+                    self._render_messages()
+
+                    # Present the console
+                    self.context.present(self.root_console)
+
+                    # Handle events
+                    for event in tcod.event.wait():
+                        try:
+                            # Convert event coordinates
+                            event = self.context.convert_event(event)
+
+                            # Handle window close button
+                            if isinstance(event, tcod.event.Quit):
+                                logger.info("Window close event received")
+                                self.quit_game()
+                                break
+
+                            # Log event details
+                            logger.debug(f"Received event: {event.__class__.__name__}")
+                            if hasattr(event, "sym"):
+                                logger.debug(f"Key: {event.sym}")
+                            if hasattr(event, "scancode"):
+                                logger.debug(f"Scancode: {event.scancode}")
+                            if hasattr(event, "mod"):
+                                logger.debug(f"Modifiers: {event.mod}")
+
+                            # Handle input
+                            action = self.input_handler.handle_input(
+                                event, self.game_state.state
+                            )
+                            logger.debug(
+                                f"Input event: {event}, resulting action: {action}"
+                            )
+
+                            if action:
+                                # Log action details
+                                logger.debug(f"Processing action: {action}")
+
+                                # Get player state before action
+                                if self.player:
+                                    player_pos = self.world.component_for_entity(
+                                        self.player, Position
+                                    )
+                                    logger.debug(
+                                        f"Player position before action: ({player_pos.x}, {player_pos.y})"
+                                    )
+
+                                # Handle action
+                                self.handle_action(action)
+
+                                # Get player state after action
+                                if self.player:
+                                    player_pos = self.world.component_for_entity(
+                                        self.player, Position
+                                    )
+                                    logger.debug(
+                                        f"Player position after action: ({player_pos.x}, {player_pos.y})"
+                                    )
+
+                                if not self.running:
+                                    break
+
+                        except Exception as e:
+                            logger.error(
+                                f"Error handling event {event}: {str(e)}", exc_info=True
+                            )
+                            logger.error(f"Event details: {vars(event)}")
+                            logger.error(f"Game state: {self.game_state.state}")
+                            if self.player:
+                                try:
+                                    player_pos = self.world.component_for_entity(
+                                        self.player, Position
+                                    )
+                                    logger.error(
+                                        f"Player position: ({player_pos.x}, {player_pos.y})"
+                                    )
+                                except Exception as pe:
+                                    logger.error(
+                                        f"Could not get player position: {str(pe)}"
+                                    )
+                            raise
+
+                except Exception as e:
+                    logger.error(
+                        f"Error in game loop iteration: {str(e)}", exc_info=True
+                    )
+                    logger.error("Current game state:", exc_info=True)
+                    logger.error(f"- Game state: {self.game_state.state}")
+                    logger.error(f"- Running: {self.running}")
+                    logger.error(f"- Player entity: {self.player}")
+                    if self.player:
+                        try:
+                            player_pos = self.world.component_for_entity(
+                                self.player, Position
+                            )
+                            logger.error(
+                                f"- Player position: ({player_pos.x}, {player_pos.y})"
+                            )
+                        except Exception as pe:
+                            logger.error(f"Could not get player position: {str(pe)}")
+                    raise
+
+        except Exception as e:
+            logger.error(f"Fatal error in game loop: {str(e)}", exc_info=True)
+            logger.error("Final game state:", exc_info=True)
+            logger.error(f"- Game state: {self.game_state.state}")
+            logger.error(f"- Running: {self.running}")
+            logger.error(f"- Player entity: {self.player}")
+            if self.player:
+                try:
+                    player_pos = self.world.component_for_entity(self.player, Position)
+                    logger.error(f"- Player position: ({player_pos.x}, {player_pos.y})")
+                except Exception as pe:
+                    logger.error(f"Could not get player position: {str(pe)}")
+            raise
+
+        finally:
+            logger.info("Cleaning up game resources")
+            self.cleanup()
+
+    def render(self) -> None:
+        """Render the game screen."""
+        try:
+            # Clear the console
+            self.root_console.clear()
+
+            if (
+                self.game_state.state in (GameStates.SAVE_GAME, GameStates.LOAD_GAME)
+                and self.save_load_screen
+            ):
+                # Render save/load screen
+                self.save_load_screen.render()
+            else:
+                # Render normal game screen
+                self._render_map()
+                self._render_entities()
+                self._render_messages()
+
+            # Present the console
+            self.context.present(self.root_console)
+
+        except Exception as e:
+            logger.error(f"Error in render: {str(e)}", exc_info=True)
+            raise
+
+    def _render_messages(self) -> None:
+        """Render message log."""
+        try:
+            # メッセージ表示領域の設定
+            message_x = 1
+            message_y = MAP_HEIGHT + 1
+            message_width = SCREEN_WIDTH - 2
+            message_height = SCREEN_HEIGHT - MAP_HEIGHT - 1
+
+            # メッセージ領域の背景を描画
+            for y in range(message_y, message_y + message_height):
+                for x in range(message_x, message_x + message_width):
+                    self.root_console.rgb[y, x] = Colors.BLACK
+
+            # 最新のメッセージから表示
+            messages = self.game_state.game_messages[-message_height:]
+            for i, message in enumerate(messages):
+                self.root_console.print(
+                    x=message_x, y=message_y + i, string=message.text, fg=message.color
+                )
+
+        except Exception as e:
+            logger.error(f"Error rendering messages: {str(e)}", exc_info=True)
+            raise
+
+    def _calculate_damage(self, attacker: int, defender: int) -> int:
+        """
+        Calculate damage for an attack.
+
+        Args:
+            attacker: Entity ID of the attacker
+            defender: Entity ID of the defender
+
+        Returns:
+            Amount of damage dealt
+        """
+        try:
+            attacker_fighter = self.world.component_for_entity(attacker, Fighter)
+            defender_fighter = self.world.component_for_entity(defender, Fighter)
+
+            # 基本攻撃力を取得
+            damage = attacker_fighter.power
+
+            # 装備による攻撃力ボーナスを加算
+            if self.world.has_component(attacker, EquipmentSlots):
+                equipment_slots = self.world.component_for_entity(
+                    attacker, EquipmentSlots
+                )
+                for item_id in equipment_slots.slots.values():
+                    if item_id is not None and self.world.has_component(
+                        item_id, Equipment
+                    ):
+                        equipment = self.world.component_for_entity(item_id, Equipment)
+                        damage += equipment.power_bonus
+
+            # 防御力による軽減
+            damage -= defender_fighter.defense
+
+            # 装備による防御力ボーナスを考慮
+            if self.world.has_component(defender, EquipmentSlots):
+                equipment_slots = self.world.component_for_entity(
+                    defender, EquipmentSlots
+                )
+                for item_id in equipment_slots.slots.values():
+                    if item_id is not None and self.world.has_component(
+                        item_id, Equipment
+                    ):
+                        equipment = self.world.component_for_entity(item_id, Equipment)
+                        damage -= equipment.defense_bonus
+
+            return max(0, damage)  # ダメージは最低0
+
+        except Exception as e:
+            logger.error(f"Error calculating damage: {str(e)}", exc_info=True)
+            return 0
+
+    def _handle_enemy_death(self, enemy: int, xp: int) -> None:
+        """
+        Handle enemy death.
+
+        Args:
+            enemy: Entity ID of the dead enemy
+            xp: Experience points gained
+        """
+        try:
+            # Get enemy position and name
+            enemy_pos = self.world.component_for_entity(enemy, Position)
+            enemy_render = self.world.component_for_entity(enemy, Renderable)
+
+            logger.debug(
+                f"Creating corpse for {enemy_render.name} at position ({enemy_pos.x}, {enemy_pos.y})"
+            )
+
+            # 同じ位置にある他の敵エンティティを削除
+            for ent, (pos, _) in self.world.get_components(Position, Fighter):
+                if ent != enemy and pos.x == enemy_pos.x and pos.y == enemy_pos.y:
+                    logger.debug(f"Removing duplicate enemy at ({pos.x}, {pos.y})")
+                    self.world.delete_entity(ent)
+
+            # Check if there's already a corpse at this position
+            for ent, (pos, _) in self.world.get_components(Position, Corpse):
+                if pos.x == enemy_pos.x and pos.y == enemy_pos.y:
+                    logger.debug(
+                        f"Corpse already exists at ({pos.x}, {pos.y}), skipping corpse creation"
+                    )
+                    # Remove enemy entity
+                    self.world.delete_entity(enemy)
+                    logger.debug(f"Deleted enemy entity with ID: {enemy}")
+
+                    # Add XP to player
+                    if self.world.has_component(self.player, Level):
+                        player_level = self.world.component_for_entity(
+                            self.player, Level
+                        )
+                        if player_level.add_xp(xp):
+                            self.game_state.add_message(
+                                "Your battle skills grow stronger! You reached level "
+                                + f"{player_level.current_level}!",
+                                Colors.YELLOW,
+                            )
+
+                    logger.debug(
+                        f"Enemy {enemy_render.name} (ID: {enemy}) died at ({enemy_pos.x}, {enemy_pos.y}), player gained {xp} XP"
+                    )
+                    return
+
+            # Create corpse
+            corpse = self.world.create_entity()
+            logger.debug(f"Created corpse entity with ID: {corpse}")
+
+            corpse_name = f"remains of {enemy_render.name}"
+            self.world.add_component(corpse, Position(enemy_pos.x, enemy_pos.y))
+            self.world.add_component(
+                corpse,
+                Renderable(
+                    char="%",
+                    color=Colors.RED,
+                    render_order=RenderOrder.CORPSE,
+                    name=corpse_name,
+                ),
+            )
+            self.world.add_component(corpse, Corpse(enemy_render.name))
+            self.world.add_component(
+                corpse, Item(name=corpse_name)
+            )  # コープスをアイテムとして拾えるようにする
+
+            logger.debug(
+                f"Added components to corpse: Position({enemy_pos.x}, {enemy_pos.y}), Renderable('%', RED, CORPSE), Item"
+            )
+
+            # Remove all components from enemy entity
+            for component_type in self.world._components:
+                if self.world.has_component(enemy, component_type):
+                    self.world.remove_component(enemy, component_type)
+
+            # Remove enemy entity
+            self.world.delete_entity(enemy)
+            logger.debug(f"Deleted enemy entity with ID: {enemy}")
+
+            # Add XP to player
+            if self.world.has_component(self.player, Level):
+                player_level = self.world.component_for_entity(self.player, Level)
+                if player_level.add_xp(xp):
+                    self.game_state.add_message(
+                        "Your battle skills grow stronger! You reached level "
+                        + f"{player_level.current_level}!",
+                        Colors.YELLOW,
+                    )
+
+            logger.debug(
+                f"Enemy {enemy_render.name} (ID: {enemy}) died and created corpse (ID: {corpse}) at ({enemy_pos.x}, {enemy_pos.y}), player gained {xp} XP"
+            )
+
+        except Exception as e:
+            logger.error(f"Error handling enemy death: {str(e)}", exc_info=True)
+            raise
