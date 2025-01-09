@@ -1,10 +1,49 @@
+"""
+Base components for the game entities.
+"""
+
 from dataclasses import dataclass, field
 from enum import IntEnum, Enum, auto
-from typing import Tuple, Optional, Dict, Any, Callable
+from typing import Tuple, Optional, Dict, Any, Callable, Set, Type, ClassVar, List, Union
+import math
 
-from roguelike.world.entity.components.serializable import SerializableComponent
+from roguelike.world.entity.components.serializable import (
+    SerializableComponent,
+    range_validator,
+    custom_validator,
+    length_validator
+)
 from roguelike.world.entity.components.equipment import Equipment, EquipmentSlots
-from roguelike.core.constants import EquipmentSlot, WeaponType
+from roguelike.core.constants import EquipmentSlot, WeaponType, MAP_WIDTH, MAP_HEIGHT
+
+class ComponentDependency:
+    """Manages component dependencies."""
+    
+    def __init__(self, *required_components: Type[SerializableComponent]):
+        self.required_components = set(required_components)
+    
+    def __call__(self, cls: Type[SerializableComponent]) -> Type[SerializableComponent]:
+        """Register dependencies for a component."""
+        if not hasattr(cls, 'dependencies'):
+            cls.dependencies: ClassVar[Set[Type[SerializableComponent]]] = set()
+        cls.dependencies.update(self.required_components)
+        
+        # Add validate_dependencies method
+        def validate_dependencies(entity_components: Set[Type[SerializableComponent]]) -> bool:
+            """Validate that all required components are present."""
+            return all(dep in entity_components for dep in cls.dependencies)
+        
+        cls.validate_dependencies = staticmethod(validate_dependencies)
+        return cls
+
+class AIBehavior(Enum):
+    """Available AI behaviors."""
+    BASIC = "basic"
+    CONFUSED = "confused"
+    AGGRESSIVE = "aggressive"
+    COWARD = "coward"
+    RANGED = "ranged"
+    SUPPORT = "support"
 
 class RenderOrder(IntEnum):
     """Render order for entities."""
@@ -12,11 +51,39 @@ class RenderOrder(IntEnum):
     ITEM = 2
     ACTOR = 3
 
+class StatusEffect(Enum):
+    """Available status effects."""
+    POISONED = "poisoned"
+    BURNING = "burning"
+    FROZEN = "frozen"
+    STUNNED = "stunned"
+    HASTED = "hasted"
+    SLOWED = "slowed"
+    INVISIBLE = "invisible"
+    REGENERATING = "regenerating"
+
+@dataclass
+class StatusEffectData:
+    """Data for a status effect."""
+    type: StatusEffect
+    duration: int
+    strength: int
+    source_entity: Optional[int] = None
+
+@ComponentDependency()  # No dependencies
 @dataclass
 class Position(SerializableComponent):
     """Position component."""
-    x: int
-    y: int
+    x: int = field(default_factory=lambda: custom_validator(
+        lambda x: 0 <= x < MAP_WIDTH,
+        f"X coordinate must be between 0 and {MAP_WIDTH-1}",
+        0
+    ))
+    y: int = field(default_factory=lambda: custom_validator(
+        lambda y: 0 <= y < MAP_HEIGHT,
+        f"Y coordinate must be between 0 and {MAP_HEIGHT-1}",
+        0
+    ))
     
     def distance_to(self, other: 'Position') -> int:
         """Calculate distance to another position."""
@@ -32,226 +99,221 @@ class Position(SerializableComponent):
             return NotImplemented
         return self.x == other.x and self.y == other.y
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        return {
-            '__type__': self.__class__.__name__,
-            '__module__': self.__class__.__module__,
-            'data': {
-                'x': self.x,
-                'y': self.y
-            }
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'Position':
-        """Create from dictionary after deserialization."""
-        # Handle Position object
-        if isinstance(data, Position):
-            return cls(x=data.x, y=data.y)
-        # Handle dictionary formats
-        elif isinstance(data, dict):
-            if 'data' in data:
-                pos_data = data['data']
-            else:
-                pos_data = data
-            return cls(
-                x=pos_data['x'],
-                y=pos_data['y']
-            )
-        # Handle tuple or list format
-        elif isinstance(data, (tuple, list)) and len(data) == 2:
-            return cls(x=data[0], y=data[1])
-        else:
-            raise ValueError(f"Invalid data format for Position: {data}")
-
-@dataclass
-class Renderable(SerializableComponent):
-    """Renderable component."""
-    char: str
-    color: Tuple[int, int, int]
-    render_order: RenderOrder
-    name: str
-    always_visible: bool = False
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        return {
-            '__type__': self.__class__.__name__,
-            '__module__': self.__class__.__module__,
-            'data': {
-                'char': self.char,
-                'color': list(self.color),
-                'render_order': self.render_order.value,
-                'name': self.name,
-                'always_visible': self.always_visible
-            }
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any] | 'Renderable') -> 'Renderable':
-        """Create from dictionary after deserialization."""
-        # Renderableオブジェクトが直接渡された場合
-        if isinstance(data, Renderable):
-            return cls(
-                char=data.char,
-                color=tuple(data.color),
-                render_order=data.render_order,
-                name=data.name,
-                always_visible=data.always_visible
-            )
-            
-        # 辞書形式の場合
-        if not isinstance(data, dict):
-            raise ValueError(f"Invalid data format for Renderable: {data}")
-            
-        component_data = data.get('data', data)
-        if not isinstance(component_data, dict):
-            raise ValueError(f"Invalid component data format: {component_data}")
-            
-        # 必須フィールドの存在確認
-        required_fields = ['char', 'color', 'render_order', 'name']
-        for field in required_fields:
-            if field not in component_data:
-                raise ValueError(f"Missing required field '{field}' in Renderable data")
-                
-        # colorの処理
-        color_data = component_data['color']
-        if not isinstance(color_data, (list, tuple)) or len(color_data) != 3:
-            raise ValueError(f"Invalid color format: {color_data}")
-        color = tuple(int(c) for c in color_data)
-        
-        # render_orderの処理
-        render_order_value = component_data['render_order']
-        try:
-            render_order = RenderOrder(render_order_value)
-        except ValueError:
-            raise ValueError(f"Invalid render_order value: {render_order_value}")
-            
-        return cls(
-            char=str(component_data['char']),
-            color=color,
-            render_order=render_order,
-            name=str(component_data['name']),
-            always_visible=bool(component_data.get('always_visible', False))
-        )
-
+@ComponentDependency(Position)  # Requires Position
 @dataclass
 class Fighter(SerializableComponent):
-    """Combat stats component."""
-    max_hp: int
-    hp: int
-    defense: int
-    power: int
-    xp: int = 0
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for serialization."""
-        return {
-            '__type__': self.__class__.__name__,
-            '__module__': self.__class__.__module__,
-            'data': {
-                'max_hp': self.max_hp,
-                'hp': self.hp,
-                'defense': self.defense,
-                'power': self.power,
-                'xp': self.xp
-            }
-        }
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any] | 'Fighter') -> 'Fighter':
-        """Create from dictionary after deserialization."""
-        # Fighterオブジェクトが直接渡された場合
-        if isinstance(data, Fighter):
-            return cls(
-                max_hp=data.max_hp,
-                hp=data.hp,
-                defense=data.defense,
-                power=data.power,
-                xp=data.xp
-            )
-            
-        # 辞書形式の場合
-        if not isinstance(data, dict):
-            raise ValueError(f"Invalid data format for Fighter: {data}")
-            
-        component_data = data.get('data', data)
-        if not isinstance(component_data, dict):
-            raise ValueError(f"Invalid component data format: {component_data}")
-            
-        return cls(
-            max_hp=int(component_data['max_hp']),
-            hp=int(component_data['hp']),
-            defense=int(component_data['defense']),
-            power=int(component_data['power']),
-            xp=int(component_data.get('xp', 0))
-        )
-    
-    def take_damage(self, amount: int) -> int:
-        """
-        Take damage and return XP if died.
-        
-        Args:
-            amount: Amount of damage to take
-            
-        Returns:
-            XP value if died, 0 otherwise
-        """
-        self.hp = max(0, self.hp - amount)
-        if self.hp <= 0:
-            return self.xp
-        return 0
-    
-    def heal(self, amount: int) -> None:
-        """
-        Heal by the given amount.
-        
-        Args:
-            amount: Amount to heal
-        """
-        self.hp = min(self.max_hp, self.hp + amount)
+    """Component for entities that can fight."""
+    max_hp: int = field(default_factory=lambda: range_validator(min_value=1, default=30))
+    hp: int = field(default_factory=lambda: range_validator(min_value=0, default=30))
+    defense: int = field(default_factory=lambda: range_validator(min_value=0, default=2))
+    power: int = field(default_factory=lambda: range_validator(min_value=0, default=5))
+    xp: int = field(default_factory=lambda: range_validator(min_value=0, default=0))
 
+    def __post_init__(self):
+        """Ensure hp doesn't exceed max_hp."""
+        super().__post_init__()
+        if self.hp > self.max_hp:
+            self.hp = self.max_hp
+
+    def take_damage(self, amount: int) -> int:
+        """Take damage and return the amount of damage taken."""
+        if self.hp <= 0:
+            return 0
+        self.hp = max(0, self.hp - amount)
+        return amount
+
+    def heal(self, amount: int) -> int:
+        """Heal and return the amount of HP recovered."""
+        if self.hp <= 0 or self.hp >= self.max_hp:
+            return 0
+        old_hp = self.hp
+        self.hp = min(self.max_hp, self.hp + amount)
+        return self.hp - old_hp
+
+@ComponentDependency(Position)  # Requires Position
+@dataclass
+class Renderable(SerializableComponent):
+    """Component for entities that can be rendered."""
+    char: str = field(default_factory=lambda: length_validator(min_length=1, max_length=1, default='?'))
+    color: Tuple[int, int, int] = field(default_factory=lambda: custom_validator(
+        lambda c: isinstance(c, tuple) and len(c) == 3 and all(0 <= x <= 255 for x in c),
+        "Color must be a tuple of 3 integers between 0 and 255",
+        (255, 255, 255)
+    ))
+    render_order: RenderOrder = field(default=RenderOrder.ACTOR)
+    name: str = field(default_factory=lambda: length_validator(min_length=1, max_length=50, default='Unknown'))
+    always_visible: bool = field(default=False)
+
+@ComponentDependency(Fighter)  # Requires Fighter
+@dataclass
+class StatusEffects(SerializableComponent):
+    """Component for entities that can have status effects."""
+    effects: Dict[StatusEffect, StatusEffectData] = field(default_factory=dict)
+    
+    def add_effect(self, effect: StatusEffect, duration: int, strength: int, source: Optional[int] = None) -> None:
+        """Add or refresh a status effect."""
+        self.effects[effect] = StatusEffectData(effect, duration, strength, source)
+    
+    def remove_effect(self, effect: StatusEffect) -> None:
+        """Remove a status effect."""
+        self.effects.pop(effect, None)
+    
+    def update(self) -> None:
+        """Update status effects durations."""
+        expired = [effect for effect, data in self.effects.items() if data.duration <= 0]
+        for effect in expired:
+            self.remove_effect(effect)
+        
+        for data in self.effects.values():
+            data.duration -= 1
+
+@ComponentDependency(Position)  # Requires Position
+@dataclass
+class Vision(SerializableComponent):
+    """Component for entities that can see."""
+    range: int = field(default_factory=lambda: range_validator(min_value=1, default=8))
+    can_see_invisible: bool = field(default=False)
+    night_vision: bool = field(default=False)
+    
+    def can_see(self, distance: float) -> bool:
+        """Check if entity can see at given distance."""
+        return distance <= self.range
+
+@ComponentDependency(Position, Fighter)  # Requires Position and Fighter
+@dataclass
+class Skills(SerializableComponent):
+    """Component for entities that can use skills."""
+    available_skills: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    cooldowns: Dict[str, int] = field(default_factory=dict)
+    
+    def add_skill(self, skill_id: str, data: Dict[str, Any]) -> None:
+        """Add a new skill."""
+        self.available_skills[skill_id] = data
+        self.cooldowns[skill_id] = 0
+    
+    def remove_skill(self, skill_id: str) -> None:
+        """Remove a skill."""
+        self.available_skills.pop(skill_id, None)
+        self.cooldowns.pop(skill_id, None)
+    
+    def update_cooldowns(self) -> None:
+        """Update skill cooldowns."""
+        for skill_id in list(self.cooldowns.keys()):
+            if self.cooldowns[skill_id] > 0:
+                self.cooldowns[skill_id] -= 1
+
+@ComponentDependency(Position)  # Requires Position
+@dataclass
+class Experience(SerializableComponent):
+    """Component for entities that can gain experience."""
+    level: int = field(default_factory=lambda: range_validator(min_value=1, default=1))
+    current_xp: int = field(default_factory=lambda: range_validator(min_value=0, default=0))
+    xp_to_next_level: int = field(init=False)
+    skill_points: int = field(default_factory=lambda: range_validator(min_value=0, default=0))
+    
+    def __post_init__(self):
+        """Calculate XP needed for next level."""
+        super().__post_init__()
+        self.xp_to_next_level = self.calculate_xp_for_level(self.level + 1)
+    
+    @staticmethod
+    def calculate_xp_for_level(level: int) -> int:
+        """Calculate XP needed for a given level."""
+        return int(100 * (level - 1) * math.sqrt(level))
+    
+    def add_xp(self, amount: int) -> bool:
+        """Add XP and return True if leveled up."""
+        self.current_xp += amount
+        if self.current_xp >= self.xp_to_next_level:
+            self.level_up()
+            return True
+        return False
+    
+    def level_up(self) -> None:
+        """Level up the entity."""
+        self.level += 1
+        self.current_xp -= self.xp_to_next_level
+        self.xp_to_next_level = self.calculate_xp_for_level(self.level + 1)
+        self.skill_points += 1
+
+@ComponentDependency(Position, Fighter)  # Requires Position and Fighter
 @dataclass
 class AI(SerializableComponent):
     """AI behavior component."""
-    behavior: str = "basic"
-    turns_confused: int = 0
+    behavior: AIBehavior = field(default_factory=lambda: custom_validator(
+        lambda b: isinstance(b, AIBehavior) or b in [e.value for e in AIBehavior],
+        f"Behavior must be one of: {', '.join(e.value for e in AIBehavior)}",
+        AIBehavior.BASIC
+    ))
+    turns_confused: int = field(default_factory=lambda: range_validator(min_value=0, default=0))
+    target_entity: Optional[int] = field(default=None)
+    last_known_position: Optional[Position] = field(default=None)
+    aggression_range: int = field(default_factory=lambda: range_validator(min_value=1, default=8))
+    flee_threshold: float = field(default_factory=lambda: range_validator(min_value=0.0, max_value=1.0, default=0.3))
 
+    def __post_init__(self):
+        """Convert string behavior to enum and validate."""
+        super().__post_init__()
+        if isinstance(self.behavior, str):
+            try:
+                self.behavior = AIBehavior(self.behavior)
+            except ValueError:
+                raise ValueError(f"Invalid behavior: {self.behavior}")
+
+    def is_confused(self) -> bool:
+        """Check if the entity is confused."""
+        return self.turns_confused > 0
+
+    def update_confusion(self) -> None:
+        """Update confusion status."""
+        if self.turns_confused > 0:
+            self.turns_confused -= 1
+
+    def set_target(self, entity_id: int, position: Position) -> None:
+        """Set target entity and its last known position."""
+        self.target_entity = entity_id
+        self.last_known_position = position
+
+    def clear_target(self) -> None:
+        """Clear target information."""
+        self.target_entity = None
+        self.last_known_position = None
+
+@ComponentDependency(Position)  # Requires Position
 @dataclass
 class Inventory(SerializableComponent):
-    """Inventory component."""
-    capacity: int
-    items: list = None
-    
+    """Component for entities that can carry items."""
+    capacity: int = field(default_factory=lambda: range_validator(min_value=1, default=26))
+    items: Dict[int, int] = field(default_factory=dict)  # item_id -> slot_index
+
     def __post_init__(self):
-        """Initialize items list."""
-        if self.items is None:
-            self.items = []
-    
-    def add_item(self, item: int) -> bool:
-        """
-        Add an item to inventory.
-        
-        Args:
-            item: Item entity ID
-            
-        Returns:
-            True if item was added
-        """
-        if len(self.items) >= self.capacity:
-            return False
-        self.items.append(item)
-        return True
-    
-    def remove_item(self, item: int) -> None:
-        """
-        Remove an item from inventory.
-        
-        Args:
-            item: Item entity ID
-        """
-        self.items.remove(item)
+        """Validate inventory state."""
+        super().__post_init__()
+        # Ensure no duplicate slots
+        used_slots = set()
+        for item_id, slot in self.items.items():
+            if slot in used_slots:
+                raise ValueError(f"Duplicate slot index: {slot}")
+            if slot >= self.capacity:
+                raise ValueError(f"Slot index {slot} exceeds capacity {self.capacity}")
+            used_slots.add(slot)
+
+    def add_item(self, item_id: int) -> Optional[int]:
+        """Add an item to the first available slot."""
+        used_slots = set(self.items.values())
+        for i in range(self.capacity):
+            if i not in used_slots:
+                self.items[item_id] = i
+                return i
+        return None
+
+    def remove_item(self, item_id: int) -> Optional[int]:
+        """Remove an item and return its slot number."""
+        return self.items.pop(item_id, None)
+
+    def is_full(self) -> bool:
+        """Check if inventory is full."""
+        return len(self.items) >= self.capacity
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""

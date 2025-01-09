@@ -668,38 +668,34 @@ class Engine:
             raise
     
     def _handle_pickup(self) -> None:
-        """Handle pickup action."""
+        """Handle picking up an item."""
         try:
-            if not self.player:
-                logger.warning("Pickup attempted but no player entity exists")
-                return
-                
             player_pos = self.world.component_for_entity(self.player, Position)
             player_inventory = self.world.component_for_entity(self.player, Inventory)
-            
-            # Check for items at player's position
+
+            # Find items at player's position
             items_found = False
-            for ent, (pos, item) in self.world.get_components(Position, Item):
+            for ent, (pos, _) in self.world.get_components(Position, Item):
                 if pos.x == player_pos.x and pos.y == player_pos.y:
                     items_found = True
-                    if len(player_inventory.items) >= player_inventory.capacity:
+                    # Check if inventory is full
+                    slot = player_inventory.add_item(ent)
+                    if slot is None:
                         item_name = self.world.component_for_entity(ent, Renderable).name
                         self.game_state.add_message(
-                            f"Your inventory is full! Cannot pick up {item_name}.",
-                            Colors.YELLOW
+                            f"Your inventory is full, cannot pick up {item_name}!",
+                            Colors.RED
                         )
                         logger.info(f"Pickup failed: inventory full, item={item_name}")
                     else:
-                        # Add item to inventory
-                        player_inventory.items.append(ent)
+                        # Add item to inventory and remove from map
                         item_name = self.world.component_for_entity(ent, Renderable).name
+                        self.world.remove_component(ent, Position)  # Remove from map
                         self.game_state.add_message(
                             f"You pick up the {item_name}!",
                             Colors.GREEN
                         )
-                        logger.info(f"Picked up item: {item_name}")
-                        # Remove Position component to take it off the map
-                        self.world.remove_component(ent, Position)
+                        logger.info(f"Picked up item: {item_name}, slot={slot}")
                     break
             
             if not items_found:
@@ -708,9 +704,8 @@ class Engine:
                     Colors.YELLOW
                 )
                 logger.debug("No items found at player position")
-                
         except Exception as e:
-            logger.error(f"Error in pickup handling: {str(e)}", exc_info=True)
+            logger.error(f"Error in pickup handling: {e}", exc_info=True)
             raise
     
     def handle_action(self, action: Dict[str, Any]) -> None:

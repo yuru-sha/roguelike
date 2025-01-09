@@ -4,6 +4,10 @@ Game constants.
 
 from enum import Enum, auto
 
+# TODO: Add configuration file support for game settings
+# TODO: Add difficulty level settings
+# FIXME: Some constants should be calculated based on screen size
+
 # Screen dimensions
 SCREEN_WIDTH = 80
 SCREEN_HEIGHT = 50
@@ -37,6 +41,9 @@ INVENTORY_WIDTH = 50
 # Level up
 LEVEL_SCREEN_WIDTH = 40
 CHARACTER_SCREEN_WIDTH = 30
+
+# TODO: Add more configurable constants for game balance
+# FIXME: Magic numbers should be explained or renamed
 
 # Game states
 class GameStates(Enum):
