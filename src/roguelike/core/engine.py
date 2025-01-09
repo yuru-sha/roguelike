@@ -60,6 +60,22 @@ class Engine:
             vsync=True
         )
         
+        # Disable key repeat
+        tcod.lib.SDL_StartTextInput()
+        tcod.lib.SDL_StopTextInput()
+        tcod.lib.SDL_SetHint(b"SDL_HINT_NO_SIGNAL_HANDLERS", b"1")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS", b"1")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_VIDEO_ALLOW_SCREENSAVER", b"1")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH", b"1")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_VIDEO_X11_NET_WM_PING", b"0")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_MOUSE_AUTO_CAPTURE", b"0")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_RENDER_BATCHING", b"1")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_EVENT_LOGGING", b"0")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_KEYBOARD_TEXT_EDITING", b"0")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_MOUSE_TOUCH_EVENTS", b"0")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_TOUCH_MOUSE_EVENTS", b"0")
+        tcod.lib.SDL_SetHint(b"SDL_HINT_IDLE_TIMER_DISABLED", b"1")
+        
         # Initialize game state
         self.game_state = GameState()
         self.input_handler = InputHandler()

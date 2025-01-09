@@ -53,6 +53,10 @@ class InputHandler:
         Returns:
             Action dictionary or None
         """
+        # Ignore key repeat events
+        if isinstance(event, tcod.event.KeyDown) and event.repeat:
+            return None
+            
         if game_state == GameStates.PLAYERS_TURN:
             return self._handle_player_turn_keys(event)
         elif game_state == GameStates.PLAYER_DEAD:
