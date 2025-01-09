@@ -50,6 +50,7 @@ class GameState(SerializableComponent):
     state: GameStates = GameStates.PLAYERS_TURN
     targeting_item: Optional[int] = None
     wizard_mode: bool = False
+    auto_save_interval: int = 50  # Number of turns between auto-saves
 
     def __post_init__(self):
         if self.game_messages is None:
@@ -144,6 +145,7 @@ class GameState(SerializableComponent):
             "state": self.state.name,
             "targeting_item": self.targeting_item,
             "wizard_mode": self.wizard_mode,
+            "auto_save_interval": self.auto_save_interval,
         }
 
     @classmethod
@@ -167,4 +169,5 @@ class GameState(SerializableComponent):
             state=GameStates[data["state"]],
             targeting_item=data["targeting_item"],
             wizard_mode=data["wizard_mode"],
+            auto_save_interval=data.get("auto_save_interval", 50),  # Default to 50 if not present
         )
