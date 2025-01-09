@@ -126,4 +126,9 @@ LEVEL_UP_BASE = 200
 LEVEL_UP_FACTOR = 150
 
 # Wizard mode
-WIZARD_MODE_PASSWORD = "wizard" 
+WIZARD_MODE_PASSWORD = "wizard"
+
+# Save settings
+AUTO_SAVE_INTERVAL = 100  # Number of turns between auto-saves
+MAX_BACKUP_FILES = 5      # Maximum number of backup files to keep
+BACKUP_ENABLED = True     # Whether to create backups when saving 

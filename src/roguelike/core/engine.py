@@ -16,6 +16,9 @@ from roguelike.core.constants import (
     SCREEN_WIDTH, SCREEN_HEIGHT,
     MAP_WIDTH, MAP_HEIGHT,
     TORCH_RADIUS,
+    AUTO_SAVE_INTERVAL,
+    MAX_BACKUP_FILES,
+    BACKUP_ENABLED,
     Colors
 )
 from roguelike.game.states.game_state import GameState, GameStates
@@ -97,6 +100,9 @@ class Engine:
         # UI screens
         self.save_load_screen: Optional[SaveLoadScreen] = None
         
+        # Auto-save counter
+        self.turns_since_save = 0
+        
         logger.info("Game engine initialized")
     
     def save_game(self, slot: int = 0) -> None:
@@ -107,6 +113,10 @@ class Engine:
             slot: Save slot number
         """
         logger.info(f"Saving game to slot {slot}")
+        
+        # Create backup if enabled
+        if BACKUP_ENABLED and slot >= 0:
+            self._create_backup(slot)
         
         # Collect all entities and their components
         entities = {}
@@ -142,6 +152,44 @@ class Engine:
         # Save to file
         SaveManager.save_game(save_data, slot)
         logger.info("Game saved successfully")
+        
+        # Reset auto-save counter
+        self.turns_since_save = 0
+    
+    def _create_backup(self, slot: int) -> None:
+        """
+        Create a backup of the save file.
+        
+        Args:
+            slot: Save slot number to backup
+        """
+        save_dir = SaveManager.SAVE_DIR
+        save_file = save_dir / f'save_{slot}.sav'
+        
+        if not save_file.exists():
+            return
+            
+        # Create backup directory
+        backup_dir = save_dir / 'backup'
+        backup_dir.mkdir(exist_ok=True)
+        
+        # Rotate backups
+        for i in range(MAX_BACKUP_FILES - 1, 0, -1):
+            old_backup = backup_dir / f'save_{slot}.{i}.bak'
+            new_backup = backup_dir / f'save_{slot}.{i + 1}.bak'
+            if old_backup.exists():
+                old_backup.rename(new_backup)
+        
+        # Create new backup
+        import shutil
+        backup_file = backup_dir / f'save_{slot}.1.bak'
+        shutil.copy2(save_file, backup_file)
+        logger.info(f"Created backup: {backup_file}")
+        
+        # Remove oldest backup if exceeding limit
+        old_backup = backup_dir / f'save_{slot}.{MAX_BACKUP_FILES + 1}.bak'
+        if old_backup.exists():
+            old_backup.unlink()
     
     def load_game(self, slot: int = 0) -> bool:
         """
@@ -506,10 +554,13 @@ class Engine:
             
             if action_type == 'move':
                 self._handle_movement(action)
+                self._check_auto_save()
             elif action_type == 'use_stairs':
                 self._handle_stairs(action)
+                self._check_auto_save()
             elif action_type == 'wait':
                 logger.debug("Player waited")
+                self._check_auto_save()
                 pass  # Do nothing, just pass the turn
             elif action_type == 'exit':
                 if self.game_state.state in (GameStates.SAVE_GAME, GameStates.LOAD_GAME):
@@ -559,6 +610,13 @@ class Engine:
         except Exception as e:
             logger.error(f"Error handling action {action}: {str(e)}", exc_info=True)
             raise
+    
+    def _check_auto_save(self) -> None:
+        """Check if it's time for auto-save and perform it if needed."""
+        self.turns_since_save += 1
+        if self.turns_since_save >= AUTO_SAVE_INTERVAL:
+            logger.info("Performing auto-save")
+            self.auto_save()
     
     def new_game(self) -> None:
         """Start a new game."""

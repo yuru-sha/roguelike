@@ -25,12 +25,74 @@ SAVE_VERSION = "1.0.0"
 
 # Version migration functions
 VERSION_MIGRATIONS: Dict[str, Tuple[str, Callable[[Dict[str, Any]], Dict[str, Any]]]] = {
-    # Example migration:
-    # "0.9.0": ("1.0.0", lambda data: {
-    #     **data,
-    #     "new_field": "default_value"
-    # })
+    "0.9.0": ("1.0.0", lambda data: {
+        **data,
+        "game_state": {
+            **(data.get("game_state", {})),
+            "auto_save_interval": 100,  # Add auto-save interval setting
+            "backup_enabled": True,     # Add backup setting
+        }
+    })
 }
+
+def validate_save_data(data: Dict[str, Any]) -> bool:
+    """
+    Validate save data structure and content.
+    
+    Args:
+        data: Save data to validate
+        
+    Returns:
+        True if data is valid, False otherwise
+    """
+    try:
+        # Check required fields
+        required_fields = ["version", "game_state", "entities", "tiles", "player_id", "dungeon_level"]
+        if not all(field in data for field in required_fields):
+            logger.error("Missing required fields in save data")
+            return False
+            
+        # Validate version format
+        version = data["version"]
+        if not isinstance(version, str) or not all(part.isdigit() for part in version.split(".")):
+            logger.error(f"Invalid version format: {version}")
+            return False
+            
+        # Validate game state
+        game_state = data["game_state"]
+        if not isinstance(game_state, dict):
+            logger.error("Invalid game state format")
+            return False
+            
+        # Validate entities
+        entities = data["entities"]
+        if not isinstance(entities, dict):
+            logger.error("Invalid entities format")
+            return False
+            
+        # Validate tiles
+        tiles = data["tiles"]
+        if not isinstance(tiles, list) or not all(isinstance(row, list) for row in tiles):
+            logger.error("Invalid tiles format")
+            return False
+            
+        # Validate player ID
+        player_id = data["player_id"]
+        if not isinstance(player_id, int):
+            logger.error("Invalid player ID format")
+            return False
+            
+        # Validate dungeon level
+        dungeon_level = data["dungeon_level"]
+        if not isinstance(dungeon_level, int) or dungeon_level < 1:
+            logger.error("Invalid dungeon level")
+            return False
+            
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error validating save data: {e}")
+        return False
 
 class SaveVersionError(Exception):
     """Error raised when save data version is incompatible."""
