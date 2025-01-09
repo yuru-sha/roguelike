@@ -19,7 +19,8 @@ from roguelike.core.constants import (
     AUTO_SAVE_INTERVAL,
     MAX_BACKUP_FILES,
     BACKUP_ENABLED,
-    Colors
+    Colors,
+    SAVE_VERSION
 )
 from roguelike.game.states.game_state import GameState, GameStates
 from roguelike.ui.handlers.input_handler import InputHandler
@@ -27,11 +28,11 @@ from roguelike.ui.screens.save_load_screen import SaveLoadScreen
 from roguelike.world.map.generator.dungeon_generator import DungeonGenerator
 from roguelike.world.entity.components.base import (
     Position, Renderable, Fighter, Item, Equipment,
-    Level, AI, Inventory, EquipmentSlots, Corpse
+    Level, AI, Inventory, EquipmentSlots, Corpse, RenderOrder
 )
 from roguelike.world.entity.prefabs.player import create_player
 from roguelike.world.spawner.spawner import populate_dungeon
-from roguelike.world.map.tiles import TileType
+from roguelike.world.map.tiles import TileType, Tile
 from roguelike.utils.logging import GameLogger
 from roguelike.utils.serialization import SaveManager
 
@@ -42,13 +43,29 @@ class Engine:
     The main game engine class that coordinates all game systems.
     """
     
-    def __init__(self):
+    def __init__(self, skip_lock_check: bool = False):
         """Initialize the game engine."""
         logger.info("Initializing game engine")
         
         # Get the project root directory
-        project_root = Path(__file__).parent.parent.parent.parent
+        project_root = Path(__file__).parents[3]
         assets_path = project_root / 'data' / 'assets' / 'dejavu10x10_gs_tc.png'
+        
+        # Check for existing lock file
+        self.lock_file = project_root / '.game.lock'
+        if not skip_lock_check:
+            if self.lock_file.exists():
+                logger.error("Game is already running")
+                raise RuntimeError("Another instance of the game is already running")
+                
+            # Create lock file
+            try:
+                with self.lock_file.open('w') as f:
+                    f.write(str(os.getpid()))
+                logger.info(f"Created lock file: {self.lock_file}")
+            except Exception as e:
+                logger.error(f"Failed to create lock file: {e}")
+                raise RuntimeError("Failed to create lock file")
         
         # Initialize TCOD
         self.root_console = tcod.console.Console(SCREEN_WIDTH, SCREEN_HEIGHT)
@@ -103,58 +120,49 @@ class Engine:
         # Auto-save counter
         self.turns_since_save = 0
         
+        # Current dungeon level
+        self.dungeon_level = 1
+        
         logger.info("Game engine initialized")
     
-    def save_game(self, slot: int = 0) -> None:
+    def save_game(self, slot: int = 0) -> bool:
         """
         Save the current game state.
         
         Args:
             slot: Save slot number
+            
+        Returns:
+            True if save successful, False otherwise
         """
-        logger.info(f"Saving game to slot {slot}")
-        
-        # Create backup if enabled
-        if BACKUP_ENABLED and slot >= 0:
-            self._create_backup(slot)
-        
-        # Collect all entities and their components
-        entities = {}
-        for entity_id in self.world.entities:
-            components = {}
-            for component_type in self.world.components_for_entity(entity_id):
-                component = self.world.component_for_entity(entity_id, component_type)
-                components[component_type.__name__] = component.to_dict()
-            entities[entity_id] = components
-        
-        # Convert tiles to serializable format
-        tiles_data = []
-        for row in self.tiles:
-            tiles_row = []
-            for tile in row:
-                tiles_row.append({
-                    'blocked': tile.blocked,
-                    'block_sight': tile.block_sight,
-                    'explored': tile.explored,
-                    'tile_type': tile.tile_type.name
-                })
-            tiles_data.append(tiles_row)
-        
-        # Prepare save data
-        save_data = {
-            'game_state': self.game_state.to_dict(),
-            'entities': entities,
-            'tiles': tiles_data,
-            'player_id': self.player,
-            'dungeon_level': self.game_state.dungeon_level
-        }
-        
-        # Save to file
-        SaveManager.save_game(save_data, slot)
-        logger.info("Game saved successfully")
-        
-        # Reset auto-save counter
-        self.turns_since_save = 0
+        try:
+            # Prepare save data
+            tiles_data = [[tile.to_dict() if tile is not None else None for tile in row] for row in self.tiles] if self.tiles is not None else None
+            logger.debug(f"Tiles data: {tiles_data}")
+            
+            save_data = {
+                "version": SAVE_VERSION,
+                "game_state": self.game_state.to_dict(),
+                "entities": self._serialize_entities(),
+                "tiles": tiles_data,
+                "player_id": self.player,
+                "dungeon_level": self.dungeon_level
+            }
+            
+            # Save game
+            if SaveManager.save_game(save_data, slot):
+                self.game_state.add_message("Game saved.", Colors.GREEN)
+                logger.info("Game saved successfully")
+                return True
+            else:
+                self.game_state.add_message("Failed to save game!", Colors.RED)
+                logger.error("Failed to save game")
+                return False
+                
+        except Exception as e:
+            self.game_state.add_message("Failed to save game!", Colors.RED)
+            logger.error(f"Error saving game: {e}")
+            return False
     
     def _create_backup(self, slot: int) -> None:
         """
@@ -163,7 +171,7 @@ class Engine:
         Args:
             slot: Save slot number to backup
         """
-        save_dir = SaveManager.SAVE_DIR
+        save_dir = SaveManager.get_save_dir()
         save_file = save_dir / f'save_{slot}.sav'
         
         if not save_file.exists():
@@ -199,51 +207,135 @@ class Engine:
             slot: Save slot number
             
         Returns:
-            True if game was loaded successfully
+            True if load successful, False otherwise
         """
-        logger.info(f"Loading game from slot {slot}")
-        
-        # Load save data
-        save_data = SaveManager.load_game(slot)
-        if not save_data:
-            logger.warning(f"No save file found in slot {slot}")
-            return False
-        
         try:
-            # Clear current state
-            self.world = esper.World()
+            # Load save data
+            save_data = SaveManager.load_game(slot)
+            if not save_data:
+                self.game_state.add_message("Failed to load game!", Colors.RED)
+                logger.error("Failed to load game: No save data")
+                return False
             
-            # Restore game state
-            self.game_state = GameState.from_dict(save_data['game_state'])
+            # Validate version
+            if save_data.get("version") != SAVE_VERSION:
+                self.game_state.add_message("Incompatible save version!", Colors.RED)
+                logger.error(f"Incompatible save version: {save_data.get('version')}")
+                return False
             
-            # Restore tiles
-            self.tiles = np.empty((MAP_HEIGHT, MAP_WIDTH), dtype=object)
-            for y, row in enumerate(save_data['tiles']):
-                for x, tile_data in enumerate(row):
-                    self.tiles[y][x] = TileType[tile_data['tile_type']].value
-                    self.tiles[y][x].explored = tile_data['explored']
+            try:
+                # Restore game state
+                self.game_state.from_dict(save_data["game_state"])
+                
+                # Clear existing entities
+                self.world.clear_database()
+                
+                # Restore entities
+                self._deserialize_entities(save_data["entities"])
+                
+                # Restore tiles
+                if save_data["tiles"] is not None:
+                    from roguelike.world.map.tiles import Tile
+                    tiles_data = save_data["tiles"]
+                    tiles = []
+                    for row in tiles_data:
+                        tiles_row = []
+                        for tile_data in row:
+                            if tile_data is None:
+                                tiles_row.append(None)
+                            else:
+                                tiles_row.append(Tile.from_dict(tile_data))
+                        tiles.append(tiles_row)
+                    self.tiles = np.array(tiles, dtype=object)
+                
+                # Restore player reference
+                self.player = save_data["player_id"]
+                
+                # Restore dungeon level
+                self.dungeon_level = save_data["dungeon_level"]
+                
+                # Initialize FOV map
+                self._initialize_fov()
+                
+                # Update FOV
+                self._recompute_fov()
+                
+                self.game_state.add_message("Game loaded.", Colors.GREEN)
+                logger.info("Game loaded successfully")
+                return True
+                
+            except KeyError as e:
+                self.game_state.add_message("Corrupted save data!", Colors.RED)
+                logger.error(f"Missing key in save data: {e}")
+                return False
+                
+        except Exception as e:
+            self.game_state.add_message("Failed to load game!", Colors.RED)
+            logger.error(f"Error loading game: {e}")
+            return False
+    
+    def _serialize_entities(self) -> Dict[int, Dict[str, Any]]:
+        """
+        Serialize all entities and their components.
+        
+        Returns:
+            Dictionary mapping entity IDs to their serialized components
+        """
+        entities = {}
+        for entity in self.world._entities:
+            components = {}
+            for component_type in self.world._components:
+                if self.world.has_component(entity, component_type):
+                    component = self.world.component_for_entity(entity, component_type)
+                    components[component_type.__name__] = component.to_dict()
+            if components:
+                entities[entity] = components
+        return entities
+    
+    def _deserialize_entities(self, entities_data: Dict[int, Dict[str, Any]]) -> None:
+        """
+        Restore entities from serialized data.
+        
+        Args:
+            entities_data: Dictionary mapping entity IDs to their serialized components
+        """
+        from roguelike.world.entity.components.base import (
+            Position, Renderable, Fighter, AI, Inventory, Item, Level,
+            EquipmentSlots, Equipment, Corpse
+        )
+        
+        component_classes = {
+            'Position': Position,
+            'Renderable': Renderable,
+            'Fighter': Fighter,
+            'AI': AI,
+            'Inventory': Inventory,
+            'Item': Item,
+            'Level': Level,
+            'EquipmentSlots': EquipmentSlots,
+            'Equipment': Equipment,
+            'Corpse': Corpse
+        }
+        
+        for entity_id, components in entities_data.items():
+            # Create entity with specific ID
+            entity_id = int(entity_id)  # Ensure entity_id is an integer
+            self.world.create_entity(entity_id)
             
-            # Restore entities
-            for entity_id, components in save_data['entities'].items():
-                entity_id = int(entity_id)  # JSON converts keys to strings
-                for component_name, component_data in components.items():
-                    module = __import__('roguelike.world.entity.components.base', fromlist=[component_name])
-                    component_class = getattr(module, component_name)
+            # Add components
+            for component_name, component_data in components.items():
+                # Get component class by name
+                component_class = component_classes.get(component_name)
+                if component_class is None:
+                    raise ValueError(f"Unknown component type: {component_name}")
+                
+                # Create component instance from data
+                try:
                     component = component_class.from_dict(component_data)
                     self.world.add_component(entity_id, component)
-            
-            # Restore player reference
-            self.player = save_data['player_id']
-            
-            # Recompute FOV
-            self._initialize_fov()
-            
-            logger.info("Game loaded successfully")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to load game: {e}", exc_info=True)
-            return False
+                except Exception as e:
+                    logger.error(f"Failed to deserialize {component_name}: {e}")
+                    raise
     
     def auto_save(self) -> None:
         """Automatically save the game to a special auto-save slot."""
@@ -261,6 +353,15 @@ class Engine:
     def cleanup(self) -> None:
         """Clean up resources before exiting."""
         logger.info("Cleaning up resources")
+        
+        # Remove lock file
+        try:
+            if self.lock_file.exists():
+                self.lock_file.unlink()
+                logger.info("Removed lock file")
+        except Exception as e:
+            logger.error(f"Failed to remove lock file: {e}")
+        
         if self.context:
             self.context.close()
     
@@ -362,95 +463,109 @@ class Engine:
             key=lambda x: x[1][1].render_order
         )
         
+        logger.debug(f"Rendering {len(entities_in_render_order)} entities")
+        
         for ent, (pos, render) in entities_in_render_order:
-            if self.fov_map is not None and self.fov_map[pos.y, pos.x]:
+            # 死体は探索済みの領域では常に表示
+            is_corpse = self.world.has_component(ent, Corpse)
+            if is_corpse:
+                logger.debug(f"Found corpse at ({pos.x}, {pos.y}): {render.name}")
+            
+            # 視界内か、死体かつ探索済みの場合に表示
+            visible = self.fov_map[pos.y, pos.x] if self.fov_map is not None else False
+            explored = self.tiles[pos.y][pos.x].explored if self.tiles is not None else False
+            
+            if visible or (is_corpse and explored):
+                # 色の決定
+                color = render.color
+                if not visible:
+                    color = Colors.DARK_GRAY
+                elif is_corpse:
+                    color = Colors.RED
+                
+                # エンティティの描画
                 self.root_console.print(
                     y=pos.y,
                     x=pos.x,
                     string=render.char,
-                    fg=render.color
+                    fg=color
                 )
+                
+                if is_corpse:
+                    logger.debug(f"Rendered corpse at ({pos.x}, {pos.y}) with char '{render.char}' and color {color}")
     
     def _handle_movement(self, action: Dict[str, Any]) -> None:
         """Handle movement action."""
         try:
-            if not self.player:
-                logger.warning("Movement attempted but no player entity exists")
-                return
-                
             dx = action.get('dx', 0)
             dy = action.get('dy', 0)
-            logger.debug(f"Movement attempt: dx={dx}, dy={dy}")
             
             player_pos = self.world.component_for_entity(self.player, Position)
             dest_x = player_pos.x + dx
             dest_y = player_pos.y + dy
-            logger.debug(f"Current position: ({player_pos.x}, {player_pos.y}), Target position: ({dest_x}, {dest_y})")
+            
+            logger.debug(f"Player (ID: {self.player}) at ({player_pos.x}, {player_pos.y}) attempting to move to ({dest_x}, {dest_y})")
             
             # Check if destination is within bounds
             if not (0 <= dest_x < MAP_WIDTH and 0 <= dest_y < MAP_HEIGHT):
-                logger.debug(f"Movement blocked: destination out of bounds ({dest_x}, {dest_y})")
                 return
-                
-            # Check if destination is walkable
-            if self.tiles[dest_y][dest_x].blocked or self.tiles[dest_y][dest_x].block_sight:
-                logger.debug(f"Movement blocked: destination is blocked at ({dest_x}, {dest_y})")
-                return
-                
-            # Check for combat
-            target = None
-            for ent, (pos, fighter) in self.world.get_components(Position, Fighter):
-                if ent != self.player and pos.x == dest_x and pos.y == dest_y:
-                    target = ent
-                    break
             
-            if target is not None:
-                # Handle combat
-                attacker_fighter = self.world.component_for_entity(self.player, Fighter)
-                defender_fighter = self.world.component_for_entity(target, Fighter)
-                
-                damage = attacker_fighter.power - defender_fighter.defense
-                if damage > 0:
-                    defender_fighter.hp -= damage
-                    defender_name = self.world.component_for_entity(target, Renderable).name
-                    self.game_state.add_message(
-                        f"You attack the {defender_name} for {damage} damage!",
-                        Colors.WHITE
-                    )
-                    logger.info(f"Combat: Player dealt {damage} damage to {defender_name}")
+            # First check for entities at destination
+            for ent, (pos, fighter) in self.world.get_components(Position, Fighter):
+                if pos.x == dest_x and pos.y == dest_y:
+                    # Attack!
+                    target_name = self.world.component_for_entity(ent, Renderable).name
+                    logger.debug(f"Found enemy {target_name} (ID: {ent}) at ({pos.x}, {pos.y})")
+                    damage = self._calculate_damage(self.player, ent)
                     
-                    if defender_fighter.hp <= 0:
+                    if damage > 0:
                         self.game_state.add_message(
-                            f"The {defender_name} dies!",
-                            Colors.RED
+                            f"You attack {target_name} for {damage} damage!",
+                            Colors.PLAYER_ATK
                         )
-                        self.world.delete_entity(target)
-                        logger.info(f"Combat: {defender_name} was defeated")
-                else:
-                    defender_name = self.world.component_for_entity(target, Renderable).name
-                    self.game_state.add_message(
-                        f"You attack the {defender_name} but do no damage!",
-                        Colors.WHITE
-                    )
-                    logger.info(f"Combat: Attack on {defender_name} did no damage")
-            else:
-                # Check for items at destination
-                for ent, (pos, item) in self.world.get_components(Position, Item):
-                    if pos.x == dest_x and pos.y == dest_y:
-                        item_name = self.world.component_for_entity(ent, Renderable).name
+                        xp = fighter.take_damage(damage)
+                        logger.debug(f"Dealt {damage} damage to {target_name} (ID: {ent}), HP remaining: {fighter.hp}")
+                        # Check if enemy died
+                        if fighter.hp <= 0:
+                            self.game_state.add_message(
+                                f"{target_name} dies!",
+                                Colors.ENEMY_DIE
+                            )
+                            self._handle_enemy_death(ent, xp)
+                            # 敵が死亡したら、その位置にある他の敵エンティティを削除
+                            for other_ent, (other_pos, _) in self.world.get_components(Position, Fighter):
+                                if other_ent != ent and other_pos.x == pos.x and other_pos.y == pos.y:
+                                    logger.debug(f"Removing duplicate enemy at ({other_pos.x}, {other_pos.y})")
+                                    self.world.delete_entity(other_ent)
+                    else:
                         self.game_state.add_message(
-                            f"There is {item_name} here.",
-                            Colors.LIGHT_CYAN
+                            f"You attack {target_name} but do no damage!",
+                            Colors.PLAYER_ATK
                         )
-                        break
-                
-                # Move player
-                player_pos.x = dest_x
-                player_pos.y = dest_y
-                logger.debug(f"Player moved to ({dest_x}, {dest_y})")
-                self._recompute_fov()
+                    return
+            
+            # Then check if tile is blocked
+            if self.tiles[dest_y][dest_x].blocked:
+                logger.debug(f"Movement blocked by terrain at ({dest_x}, {dest_y})")
+                return
+            
+            # Check for corpses at destination
+            for ent, (pos, _) in self.world.get_components(Position, Corpse):
+                if pos.x == dest_x and pos.y == dest_y:
+                    # コープスの上を移動できる
+                    logger.debug(f"Moving over corpse at ({pos.x}, {pos.y})")
+                    player_pos.x = dest_x
+                    player_pos.y = dest_y
+                    logger.debug(f"Player (ID: {self.player}) moved to ({player_pos.x}, {player_pos.y})")
+                    return
+            
+            # Move player
+            player_pos.x = dest_x
+            player_pos.y = dest_y
+            logger.debug(f"Player (ID: {self.player}) moved to ({player_pos.x}, {player_pos.y})")
+            
         except Exception as e:
-            logger.error(f"Error in movement handling: {str(e)}", exc_info=True)
+            logger.error(f"Error handling movement: {str(e)}", exc_info=True)
             raise
     
     def _handle_stairs(self, action: Dict[str, Any]) -> None:
@@ -465,8 +580,10 @@ class Engine:
             current_tile = self.tiles[player_pos.y][player_pos.x]
             
             logger.debug(f"Attempting to use stairs: direction={direction}, player_pos=({player_pos.x}, {player_pos.y})")
+            logger.debug(f"Current tile type: {current_tile.tile_type}")
             
             if direction == 'down' and current_tile.tile_type == TileType.STAIRS_DOWN:
+                logger.debug("Found down stairs, descending...")
                 # Go down stairs
                 self.game_state.dungeon_level += 1
                 logger.info(f"Player descended to level {self.game_state.dungeon_level}")
@@ -477,6 +594,7 @@ class Engine:
                 self._change_level()
                 
             elif direction == 'up' and current_tile.tile_type == TileType.STAIRS_UP:
+                logger.debug("Found up stairs, ascending...")
                 # Go up stairs
                 if self.game_state.dungeon_level > 1:
                     self.game_state.dungeon_level -= 1
@@ -514,7 +632,7 @@ class Engine:
                         "There are no stairs up here.",
                         Colors.YELLOW
                     )
-                logger.debug(f"No {direction} stairs at current position")
+                logger.debug(f"No {direction} stairs at current position. Current tile type: {current_tile.tile_type}")
         
         except Exception as e:
             logger.error(f"Error handling stairs: {str(e)}", exc_info=True)
@@ -546,6 +664,52 @@ class Engine:
             logger.error(f"Error changing level: {str(e)}", exc_info=True)
             raise
     
+    def _handle_pickup(self) -> None:
+        """Handle pickup action."""
+        try:
+            if not self.player:
+                logger.warning("Pickup attempted but no player entity exists")
+                return
+                
+            player_pos = self.world.component_for_entity(self.player, Position)
+            player_inventory = self.world.component_for_entity(self.player, Inventory)
+            
+            # Check for items at player's position
+            items_found = False
+            for ent, (pos, item) in self.world.get_components(Position, Item):
+                if pos.x == player_pos.x and pos.y == player_pos.y:
+                    items_found = True
+                    if len(player_inventory.items) >= player_inventory.capacity:
+                        item_name = self.world.component_for_entity(ent, Renderable).name
+                        self.game_state.add_message(
+                            f"Your inventory is full! Cannot pick up {item_name}.",
+                            Colors.YELLOW
+                        )
+                        logger.info(f"Pickup failed: inventory full, item={item_name}")
+                    else:
+                        # Add item to inventory
+                        player_inventory.items.append(ent)
+                        item_name = self.world.component_for_entity(ent, Renderable).name
+                        self.game_state.add_message(
+                            f"You pick up the {item_name}!",
+                            Colors.GREEN
+                        )
+                        logger.info(f"Picked up item: {item_name}")
+                        # Remove Position component to take it off the map
+                        self.world.remove_component(ent, Position)
+                    break
+            
+            if not items_found:
+                self.game_state.add_message(
+                    "There is nothing here to pick up.",
+                    Colors.YELLOW
+                )
+                logger.debug("No items found at player position")
+                
+        except Exception as e:
+            logger.error(f"Error in pickup handling: {str(e)}", exc_info=True)
+            raise
+    
     def handle_action(self, action: Dict[str, Any]) -> None:
         """Handle a game action."""
         try:
@@ -562,6 +726,9 @@ class Engine:
                 logger.debug("Player waited")
                 self._check_auto_save()
                 pass  # Do nothing, just pass the turn
+            elif action_type == 'pickup':
+                self._handle_pickup()
+                self._check_auto_save()
             elif action_type == 'exit':
                 if self.game_state.state in (GameStates.SAVE_GAME, GameStates.LOAD_GAME):
                     self.game_state.state = GameStates.PLAYERS_TURN
@@ -573,16 +740,20 @@ class Engine:
             elif action_type == 'save_game':
                 self.game_state.state = GameStates.SAVE_GAME
                 self.save_load_screen = SaveLoadScreen(self.root_console, is_save=True)
+                self.game_state.add_message(
+                    "Select a slot to save the game (0-9)",
+                    Colors.WHITE
+                )
             elif action_type == 'load_game':
                 self.game_state.state = GameStates.LOAD_GAME
                 self.save_load_screen = SaveLoadScreen(self.root_console, is_save=False)
+                self.game_state.add_message(
+                    "Select a slot to load the game (0-9)",
+                    Colors.WHITE
+                )
             elif action_type == 'select' and self.save_load_screen:
                 if self.game_state.state == GameStates.SAVE_GAME:
                     self.save_game(self.save_load_screen.selected_slot)
-                    self.game_state.add_message(
-                        f"Game saved to slot {self.save_load_screen.selected_slot}",
-                        Colors.GREEN
-                    )
                     self.game_state.state = GameStates.PLAYERS_TURN
                     self.save_load_screen = None
                 elif self.game_state.state == GameStates.LOAD_GAME:
@@ -658,6 +829,7 @@ class Engine:
                     # Render the game
                     self._render_map()
                     self._render_entities()
+                    self._render_messages()
                     
                     # Present the console
                     self.context.present(self.root_console)
@@ -674,23 +846,77 @@ class Engine:
                                 self.quit_game()
                                 break
                             
-                            action = self.input_handler.handle_input(event)
+                            # Log event details
+                            logger.debug(f"Received event: {event.__class__.__name__}")
+                            if hasattr(event, 'sym'):
+                                logger.debug(f"Key: {event.sym}")
+                            if hasattr(event, 'scancode'):
+                                logger.debug(f"Scancode: {event.scancode}")
+                            if hasattr(event, 'mod'):
+                                logger.debug(f"Modifiers: {event.mod}")
+                            
+                            # Handle input
+                            action = self.input_handler.handle_input(event, self.game_state.state)
                             logger.debug(f"Input event: {event}, resulting action: {action}")
                             
                             if action:
+                                # Log action details
+                                logger.debug(f"Processing action: {action}")
+                                
+                                # Get player state before action
+                                if self.player:
+                                    player_pos = self.world.component_for_entity(self.player, Position)
+                                    logger.debug(f"Player position before action: ({player_pos.x}, {player_pos.y})")
+                                
+                                # Handle action
                                 self.handle_action(action)
+                                
+                                # Get player state after action
+                                if self.player:
+                                    player_pos = self.world.component_for_entity(self.player, Position)
+                                    logger.debug(f"Player position after action: ({player_pos.x}, {player_pos.y})")
                                 
                                 if not self.running:
                                     break
+                                    
                         except Exception as e:
                             logger.error(f"Error handling event {event}: {str(e)}", exc_info=True)
+                            logger.error(f"Event details: {vars(event)}")
+                            logger.error(f"Game state: {self.game_state.state}")
+                            if self.player:
+                                try:
+                                    player_pos = self.world.component_for_entity(self.player, Position)
+                                    logger.error(f"Player position: ({player_pos.x}, {player_pos.y})")
+                                except Exception as pe:
+                                    logger.error(f"Could not get player position: {str(pe)}")
                             raise
+                            
                 except Exception as e:
                     logger.error(f"Error in game loop iteration: {str(e)}", exc_info=True)
+                    logger.error("Current game state:", exc_info=True)
+                    logger.error(f"- Game state: {self.game_state.state}")
+                    logger.error(f"- Running: {self.running}")
+                    logger.error(f"- Player entity: {self.player}")
+                    if self.player:
+                        try:
+                            player_pos = self.world.component_for_entity(self.player, Position)
+                            logger.error(f"- Player position: ({player_pos.x}, {player_pos.y})")
+                        except Exception as pe:
+                            logger.error(f"Could not get player position: {str(pe)}")
                     raise
         
         except Exception as e:
             logger.error(f"Fatal error in game loop: {str(e)}", exc_info=True)
+            logger.error("Final game state:", exc_info=True)
+            logger.error(f"- Game state: {self.game_state.state}")
+            logger.error(f"- Running: {self.running}")
+            logger.error(f"- Player entity: {self.player}")
+            if self.player:
+                try:
+                    player_pos = self.world.component_for_entity(self.player, Position)
+                    logger.error(f"- Player position: ({player_pos.x}, {player_pos.y})")
+                except Exception as pe:
+                    logger.error(f"Could not get player position: {str(pe)}")
             raise
         
         finally:
@@ -710,10 +936,166 @@ class Engine:
                 # Render normal game screen
                 self._render_map()
                 self._render_entities()
+                self._render_messages()
             
             # Present the console
             self.context.present(self.root_console)
             
         except Exception as e:
             logger.error(f"Error in render: {str(e)}", exc_info=True)
+            raise
+    
+    def _render_messages(self) -> None:
+        """Render message log."""
+        try:
+            # メッセージ表示領域の設定
+            message_x = 1
+            message_y = MAP_HEIGHT + 1
+            message_width = SCREEN_WIDTH - 2
+            message_height = SCREEN_HEIGHT - MAP_HEIGHT - 1
+            
+            # メッセージ領域の背景を描画
+            for y in range(message_y, message_y + message_height):
+                for x in range(message_x, message_x + message_width):
+                    self.root_console.rgb[y, x] = Colors.BLACK
+            
+            # 最新のメッセージから表示
+            messages = self.game_state.game_messages[-message_height:]
+            for i, message in enumerate(messages):
+                self.root_console.print(
+                    x=message_x,
+                    y=message_y + i,
+                    string=message.text,
+                    fg=message.color
+                )
+                
+        except Exception as e:
+            logger.error(f"Error rendering messages: {str(e)}", exc_info=True)
+            raise
+    
+    def _calculate_damage(self, attacker: int, defender: int) -> int:
+        """
+        Calculate damage for an attack.
+        
+        Args:
+            attacker: Entity ID of the attacker
+            defender: Entity ID of the defender
+            
+        Returns:
+            Amount of damage dealt
+        """
+        try:
+            attacker_fighter = self.world.component_for_entity(attacker, Fighter)
+            defender_fighter = self.world.component_for_entity(defender, Fighter)
+            
+            # 基本攻撃力を取得
+            damage = attacker_fighter.power
+            
+            # 装備による攻撃力ボーナスを加算
+            if self.world.has_component(attacker, EquipmentSlots):
+                equipment_slots = self.world.component_for_entity(attacker, EquipmentSlots)
+                for item_id in equipment_slots.slots.values():
+                    if item_id is not None and self.world.has_component(item_id, Equipment):
+                        equipment = self.world.component_for_entity(item_id, Equipment)
+                        damage += equipment.power_bonus
+            
+            # 防御力による軽減
+            damage -= defender_fighter.defense
+            
+            # 装備による防御力ボーナスを考慮
+            if self.world.has_component(defender, EquipmentSlots):
+                equipment_slots = self.world.component_for_entity(defender, EquipmentSlots)
+                for item_id in equipment_slots.slots.values():
+                    if item_id is not None and self.world.has_component(item_id, Equipment):
+                        equipment = self.world.component_for_entity(item_id, Equipment)
+                        damage -= equipment.defense_bonus
+            
+            return max(0, damage)  # ダメージは最低0
+            
+        except Exception as e:
+            logger.error(f"Error calculating damage: {str(e)}", exc_info=True)
+            return 0 
+    
+    def _handle_enemy_death(self, enemy: int, xp: int) -> None:
+        """
+        Handle enemy death.
+        
+        Args:
+            enemy: Entity ID of the dead enemy
+            xp: Experience points gained
+        """
+        try:
+            # Get enemy position and name
+            enemy_pos = self.world.component_for_entity(enemy, Position)
+            enemy_render = self.world.component_for_entity(enemy, Renderable)
+            
+            logger.debug(f"Creating corpse for {enemy_render.name} at position ({enemy_pos.x}, {enemy_pos.y})")
+            
+            # 同じ位置にある他の敵エンティティを削除
+            for ent, (pos, _) in self.world.get_components(Position, Fighter):
+                if ent != enemy and pos.x == enemy_pos.x and pos.y == enemy_pos.y:
+                    logger.debug(f"Removing duplicate enemy at ({pos.x}, {pos.y})")
+                    self.world.delete_entity(ent)
+            
+            # Check if there's already a corpse at this position
+            for ent, (pos, _) in self.world.get_components(Position, Corpse):
+                if pos.x == enemy_pos.x and pos.y == enemy_pos.y:
+                    logger.debug(f"Corpse already exists at ({pos.x}, {pos.y}), skipping corpse creation")
+                    # Remove enemy entity
+                    self.world.delete_entity(enemy)
+                    logger.debug(f"Deleted enemy entity with ID: {enemy}")
+                    
+                    # Add XP to player
+                    if self.world.has_component(self.player, Level):
+                        player_level = self.world.component_for_entity(self.player, Level)
+                        if player_level.add_xp(xp):
+                            self.game_state.add_message(
+                                "Your battle skills grow stronger! You reached level " +
+                                f"{player_level.current_level}!",
+                                Colors.YELLOW
+                            )
+                    
+                    logger.debug(f"Enemy {enemy_render.name} (ID: {enemy}) died at ({enemy_pos.x}, {enemy_pos.y}), player gained {xp} XP")
+                    return
+            
+            # Create corpse
+            corpse = self.world.create_entity()
+            logger.debug(f"Created corpse entity with ID: {corpse}")
+            
+            corpse_name = f"remains of {enemy_render.name}"
+            self.world.add_component(corpse, Position(enemy_pos.x, enemy_pos.y))
+            self.world.add_component(corpse, Renderable(
+                char='%',
+                color=Colors.RED,
+                render_order=RenderOrder.CORPSE,
+                name=corpse_name
+            ))
+            self.world.add_component(corpse, Corpse(enemy_render.name))
+            self.world.add_component(corpse, Item(name=corpse_name))  # コープスをアイテムとして拾えるようにする
+            
+            logger.debug(f"Added components to corpse: Position({enemy_pos.x}, {enemy_pos.y}), Renderable('%', RED, CORPSE), Item")
+            
+            # Remove all components from enemy entity
+            for component_type in self.world._components:
+                if self.world.has_component(enemy, component_type):
+                    self.world.remove_component(enemy, component_type)
+            
+            # Remove enemy entity
+            self.world.delete_entity(enemy)
+            logger.debug(f"Deleted enemy entity with ID: {enemy}")
+            
+            # Add XP to player
+            if self.world.has_component(self.player, Level):
+                player_level = self.world.component_for_entity(self.player, Level)
+                if player_level.add_xp(xp):
+                    self.game_state.add_message(
+                        "Your battle skills grow stronger! You reached level " +
+                        f"{player_level.current_level}!",
+                        Colors.YELLOW
+                    )
+            
+            logger.debug(f"Enemy {enemy_render.name} (ID: {enemy}) died and created corpse (ID: {corpse}) at ({enemy_pos.x}, {enemy_pos.y}), player gained {xp} XP")
+            
+        except Exception as e:
+            logger.error(f"Error handling enemy death: {str(e)}", exc_info=True)
             raise 

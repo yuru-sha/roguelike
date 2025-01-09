@@ -6,9 +6,12 @@ from typing import Dict, List, Optional, Tuple
 import tcod
 import tcod.event
 from datetime import datetime
+import logging
 
 from roguelike.core.constants import Colors, SCREEN_WIDTH, SCREEN_HEIGHT
 from roguelike.utils.serialization import SaveManager
+
+logger = logging.getLogger(__name__)
 
 class SaveLoadScreen:
     """Screen for saving and loading games."""
@@ -34,9 +37,11 @@ class SaveLoadScreen:
         
         for slot, path in saves.items():
             try:
-                timestamp = datetime.fromtimestamp(path.stat().st_mtime)
-                self.saves[slot] = timestamp
-            except (OSError, ValueError):
+                if path.exists():
+                    timestamp = datetime.fromtimestamp(path.stat().st_mtime)
+                    self.saves[slot] = timestamp
+            except (OSError, ValueError) as e:
+                logger.error(f"Error reading save file {path}: {e}")
                 continue
     
     def render(self) -> None:

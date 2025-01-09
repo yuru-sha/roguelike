@@ -36,5 +36,6 @@ ENV/
 
 # Project specific
 logs/
-data/saves/
+data/save/
 *.log
+.game.lock

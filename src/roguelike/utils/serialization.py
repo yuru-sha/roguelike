@@ -103,6 +103,8 @@ class GameEncoder(json.JSONEncoder):
     
     def default(self, obj: Any) -> Any:
         """Convert object to JSON serializable format."""
+        if isinstance(obj, dict):
+            return obj
         if is_dataclass(obj):
             return {
                 '__type__': obj.__class__.__name__,
@@ -114,7 +116,14 @@ class GameEncoder(json.JSONEncoder):
                 '__type__': 'Enum',
                 '__enum__': obj.__class__.__name__,
                 '__module__': obj.__class__.__module__,
-                'name': obj.name
+                'name': obj.name,
+                'value': obj.value
+            }
+        if hasattr(obj, 'to_dict'):
+            return {
+                '__type__': obj.__class__.__name__,
+                '__module__': obj.__class__.__module__,
+                'data': obj.to_dict()
             }
         return super().default(obj)
 
@@ -126,6 +135,10 @@ def object_hook(dct: Dict[str, Any]) -> Any:
     if dct['__type__'] == 'Enum':
         module = __import__(dct['__module__'], fromlist=[dct['__enum__']])
         enum_class = getattr(module, dct['__enum__'])
+        # 値からEnumを復元する
+        if hasattr(enum_class, 'from_value'):
+            return enum_class.from_value(dct['value'])
+        # 名前からEnumを復元する（フォールバック）
         return enum_class[dct['name']]
         
     module = __import__(dct['__module__'], fromlist=[dct['__type__']])
@@ -133,24 +146,38 @@ def object_hook(dct: Dict[str, Any]) -> Any:
     
     if is_dataclass(cls):
         return cls(**dct['data'])
+    elif hasattr(cls, 'from_dict'):
+        return cls.from_dict(dct['data'])
         
     return dct
 
 class SaveManager:
     """Manage game save data."""
     
-    SAVE_DIR = Path('data/save')
     COMPRESSION_LEVEL = 9  # Maximum compression
-    KEY_FILE = SAVE_DIR / '.key'
     SALT_SIZE = 16
+    _save_dir = Path('data/save')  # デフォルトのセーブディレクトリ
+    
+    @classmethod
+    def get_save_dir(cls) -> Path:
+        """Get the save directory path."""
+        return cls._save_dir
+    
+    @classmethod
+    def set_save_dir(cls, path: Union[str, Path]) -> None:
+        """Set the save directory path."""
+        cls._save_dir = Path(path)
+        cls.initialize()
     
     @classmethod
     def initialize(cls) -> None:
         """Initialize save directory and encryption key."""
-        cls.SAVE_DIR.mkdir(parents=True, exist_ok=True)
+        save_dir = cls.get_save_dir()
+        save_dir.mkdir(parents=True, exist_ok=True)
         
         # Generate encryption key if it doesn't exist
-        if not cls.KEY_FILE.exists():
+        key_file = save_dir / '.key'
+        if not key_file.exists():
             cls._generate_key()
     
     @classmethod
@@ -169,7 +196,8 @@ class SaveManager:
         key = base64.urlsafe_b64encode(kdf.derive(b"roguelike"))
         
         # Save salt and key
-        with cls.KEY_FILE.open('wb') as f:
+        key_file = cls.get_save_dir() / '.key'
+        with key_file.open('wb') as f:
             f.write(salt + key)
         
         logger.info("Generated new encryption key")
@@ -177,7 +205,8 @@ class SaveManager:
     @classmethod
     def _load_key(cls) -> bytes:
         """Load the encryption key."""
-        with cls.KEY_FILE.open('rb') as f:
+        key_file = cls.get_save_dir() / '.key'
+        with key_file.open('rb') as f:
             data = f.read()
             salt = data[:cls.SALT_SIZE]
             key = data[cls.SALT_SIZE:]
@@ -269,126 +298,135 @@ class SaveManager:
         return data
     
     @classmethod
-    def save_game(cls, data: Dict[str, Any], slot: int = 0) -> None:
+    def save_game(cls, data: Dict[str, Any], slot: int = 0) -> bool:
         """
-        Save game data to a file.
+        Save game data to file.
         
         Args:
             data: Game data to save
             slot: Save slot number
-        """
-        cls.initialize()
-        save_path = cls.SAVE_DIR / f'save_{slot}.sav'
-        
-        try:
-            # Add version information
-            data['version'] = SAVE_VERSION
             
-            # Convert data to JSON
+        Returns:
+            True if save successful, False otherwise
+        """
+        try:
+            # Validate data
+            if not validate_save_data(data):
+                logger.error("Invalid save data")
+                return False
+            
+            # Convert tiles to serializable format
+            if "tiles" in data:
+                tiles_data = []
+                for row in data["tiles"]:
+                    tiles_row = []
+                    for tile in row:
+                        if tile is None:
+                            tiles_row.append(None)
+                        elif isinstance(tile, dict):
+                            tiles_row.append(tile)
+                        else:
+                            tiles_row.append(tile.to_dict())
+                    tiles_data.append(tiles_row)
+                data["tiles"] = tiles_data
+            
+            # Serialize to JSON
             json_data = json.dumps(data, cls=GameEncoder)
             
-            # Compress the JSON data
-            compressed_data = cls._compress_data(json_data)
+            # Compress
+            compressed = cls._compress_data(json_data)
             
-            # Encrypt the compressed data
-            encrypted_data = cls._encrypt_data(compressed_data)
+            # Encrypt
+            encrypted = cls._encrypt_data(compressed)
             
-            # Write encrypted data to file
+            # Save to file
+            save_path = cls.get_save_dir() / f"save_{slot}.sav"
             with save_path.open('wb') as f:
-                f.write(encrypted_data)
-                
-            logger.info(f"Game saved to slot {slot}")
+                f.write(encrypted)
             
-            # Log compression and encryption stats
-            original_size = len(json_data)
-            compressed_size = len(compressed_data)
-            final_size = len(encrypted_data)
-            compression_ratio = (1 - compressed_size / original_size) * 100
-            logger.debug(
-                f"Save data stats: "
-                f"Original size: {original_size} bytes, "
-                f"Compressed size: {compressed_size} bytes, "
-                f"Final size: {final_size} bytes, "
-                f"Compression ratio: {compression_ratio:.1f}%"
-            )
+            logger.info(f"Game saved to slot {slot}")
+            return True
             
         except Exception as e:
-            logger.error(f"Failed to save game: {e}", exc_info=True)
-            raise
-            
+            logger.error(f"Error saving game: {e}")
+            return False
+    
     @classmethod
     def load_game(cls, slot: int = 0) -> Optional[Dict[str, Any]]:
         """
-        Load game data from a file.
+        Load game data from file.
         
         Args:
             slot: Save slot number
             
         Returns:
-            Loaded game data or None if file doesn't exist
-            
-        Raises:
-            SaveVersionError: If save data version is incompatible
+            Loaded game data or None if load failed
         """
-        save_path = cls.SAVE_DIR / f'save_{slot}.sav'
-        
-        if not save_path.exists():
-            return None
-            
         try:
-            # Read encrypted data from file
+            # Check if save file exists
+            save_path = cls.get_save_dir() / f"save_{slot}.sav"
+            if not save_path.exists():
+                logger.error(f"Save file not found: {save_path}")
+                return None
+            
+            # Read encrypted data
             with save_path.open('rb') as f:
-                encrypted_data = f.read()
+                encrypted = f.read()
             
-            # Decrypt data
-            compressed_data = cls._decrypt_data(encrypted_data)
+            # Decrypt
+            compressed = cls._decrypt_data(encrypted)
             
-            # Decompress data
-            json_data = cls._decompress_data(compressed_data)
+            # Decompress
+            json_data = cls._decompress_data(compressed)
             
-            # Parse JSON data
+            # Parse JSON
             data = json.loads(json_data, object_hook=object_hook)
             
-            # Check version and migrate if necessary
-            if 'version' not in data:
-                raise SaveVersionError("Save data has no version information")
-                
-            if data['version'] != SAVE_VERSION:
-                data = cls._migrate_save_data(data)
+            # Convert tiles back to Tile objects
+            if "tiles" in data:
+                from roguelike.world.map.tiles import Tile
+                tiles_data = data["tiles"]
+                tiles = []
+                for row in tiles_data:
+                    tiles_row = []
+                    for tile_data in row:
+                        if tile_data is None:
+                            tiles_row.append(None)
+                        else:
+                            tiles_row.append(Tile.from_dict(tile_data))
+                    tiles.append(tiles_row)
+                data["tiles"] = tiles
             
             logger.info(f"Game loaded from slot {slot}")
             return data
             
         except Exception as e:
-            logger.error(f"Failed to load game: {e}", exc_info=True)
-            raise
+            logger.error(f"Error loading game: {e}")
+            return None
             
     @classmethod
-    def list_saves(cls) -> Dict[int, Tuple[Path, str]]:
+    def list_saves(cls) -> Dict[int, Path]:
         """
         List all available save files.
         
         Returns:
-            Dictionary mapping slot numbers to tuples of (file path, version)
+            Dictionary mapping slot numbers to save file paths
         """
-        cls.initialize()
+        save_dir = cls.get_save_dir()
         saves = {}
         
-        for save_file in cls.SAVE_DIR.glob('save_*.sav'):
+        # Create save directory if it doesn't exist
+        save_dir.mkdir(parents=True, exist_ok=True)
+        
+        # List all save files
+        for path in save_dir.glob('save_*.sav'):
             try:
-                slot = int(save_file.stem.split('_')[1])
-                # Try to read version information
-                with save_file.open('rb') as f:
-                    encrypted_data = f.read()
-                compressed_data = cls._decrypt_data(encrypted_data)
-                json_data = cls._decompress_data(compressed_data)
-                data = json.loads(json_data)
-                version = data.get('version', 'unknown')
-                saves[slot] = (save_file, version)
-            except Exception:
-                # If we can't read the version, still include the save but mark it as unknown
-                saves[slot] = (save_file, 'unknown')
-                
+                # Extract slot number from filename
+                slot = int(path.stem.split('_')[1].split('.')[0])
+                saves[slot] = path
+            except (ValueError, IndexError):
+                continue
+        
         return saves
         
     @classmethod
@@ -402,7 +440,7 @@ class SaveManager:
         Returns:
             True if file was deleted, False if it didn't exist
         """
-        save_path = cls.SAVE_DIR / f'save_{slot}.sav'
+        save_path = cls.get_save_dir() / f'save_{slot}.sav'
         
         if save_path.exists():
             save_path.unlink()

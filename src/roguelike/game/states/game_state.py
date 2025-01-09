@@ -117,36 +117,42 @@ class GameState(SerializableComponent):
         return True
     
     def to_dict(self) -> Dict[str, Any]:
-        """Override to handle Message objects and GameStates enum."""
-        data = super().to_dict()
-        
-        # Convert Message objects to dictionaries
-        messages = []
-        for msg in self.game_messages:
-            messages.append({
-                'text': msg.text,
-                'color': msg.color
-            })
-        data['data']['game_messages'] = messages
-        
-        # Convert GameStates enum to string
-        data['data']['state'] = self.state.name
-        
-        return data
+        """Convert game state to dictionary."""
+        return {
+            'dungeon_level': self.dungeon_level,
+            'player_has_amulet': self.player_has_amulet,
+            'game_messages': [
+                {'text': msg.text, 'color': msg.color}
+                for msg in self.game_messages
+            ],
+            'previous_player_positions': {
+                str(k): v for k, v in self.previous_player_positions.items()
+            },
+            'game_won': self.game_won,
+            'state': self.state.name,
+            'targeting_item': self.targeting_item,
+            'wizard_mode': self.wizard_mode
+        }
     
     @classmethod
     def from_dict(cls: Type[T], data: Dict[str, Any]) -> T:
-        """Override to handle Message objects and GameStates enum."""
-        # Convert message dictionaries back to Message objects
-        messages = []
-        for msg_data in data['data']['game_messages']:
-            messages.append(Message(
-                text=msg_data['text'],
-                color=tuple(msg_data['color'])
-            ))
-        data['data']['game_messages'] = messages
+        """Create game state from dictionary."""
+        messages = [
+            Message(text=msg['text'], color=tuple(msg['color']))
+            for msg in data['game_messages']
+        ]
         
-        # Convert state string back to enum
-        data['data']['state'] = GameStates[data['data']['state']]
+        previous_positions = {
+            int(k): tuple(v) for k, v in data['previous_player_positions'].items()
+        }
         
-        return super().from_dict(data) 
+        return cls(
+            dungeon_level=data['dungeon_level'],
+            player_has_amulet=data['player_has_amulet'],
+            game_messages=messages,
+            previous_player_positions=previous_positions,
+            game_won=data['game_won'],
+            state=GameStates[data['state']],
+            targeting_item=data['targeting_item'],
+            wizard_mode=data['wizard_mode']
+        ) 

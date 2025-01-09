@@ -1,11 +1,3 @@
-# TODO: Add hunger system
-# TODO: Add food variety and effects
-# FIXME: Food effects should be implemented
-# OPTIMIZE: Food use function could be simplified
-# WARNING: Food nutrition values might need balancing
-# REVIEW: Consider if food should affect player stats
-# HACK: Food display characters should be moved to constants
-
 from typing import Any, Optional
 
 from roguelike.core.constants import Colors
@@ -29,7 +21,7 @@ def create_food_ration(world: Any, x: int, y: int) -> int:
     
     world.add_component(food, Position(x, y))
     world.add_component(food, Renderable(
-        char='%',
+        char='⋆',
         color=Colors.BROWN,
         render_order=RenderOrder.ITEM,
         name="Food Ration"
@@ -52,5 +44,4 @@ def use_food_ration(user: int, world: Any, **kwargs) -> Optional[str]:
     Returns:
         A message describing what happened
     """
-    # TODO: 満腹度システムの実装後に追加
     return "You eat the food ration. It tastes good!" 
