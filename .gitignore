@@ -35,7 +35,7 @@ ENV/
 .DS_Store
 
 # Project specific
-logs/
 data/save/
+data/logs/
 *.log
 .game.lock

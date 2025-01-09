@@ -1,5 +1,5 @@
 """
-エラー通知システムの実装
+Error notification system implementation
 """
 
 import json
@@ -10,14 +10,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from roguelike.utils.logging import GameLogger
+from roguelike.utils.game_logger import GameLogger
 
 logger = GameLogger.get_instance()
 
 
 @dataclass
 class Notification:
-    """通知メッセージを表すデータクラス"""
+    """Data class representing a notification message"""
 
     message: str
     level: str  # 'error', 'warning', 'info'
@@ -26,7 +26,7 @@ class Notification:
     details: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        """通知をJSON形式に変換する"""
+        """Convert notification to JSON format"""
         return {
             "message": self.message,
             "level": self.level,
@@ -37,7 +37,7 @@ class Notification:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Notification":
-        """JSON形式から通知を復元する"""
+        """Restore notification from JSON format"""
         return cls(
             message=data["message"],
             level=data["level"],
@@ -48,7 +48,7 @@ class Notification:
 
 
 class NotificationManager:
-    """通知の管理とハンドリングを行うクラス"""
+    """Class for managing and handling notifications"""
 
     _instance = None
     _lock = threading.Lock()
@@ -61,7 +61,7 @@ class NotificationManager:
             return cls._instance
 
     def _initialize(self) -> None:
-        """インスタンスの初期化"""
+        """Initialize the instance"""
         self.notifications: List[Notification] = []
         self.max_notifications = 100
         self.handlers: Dict[str, List[Callable[[Notification], None]]] = {
@@ -77,57 +77,57 @@ class NotificationManager:
 
     def add_notification(self, notification: Notification) -> None:
         """
-        新しい通知を追加する。
-        通知はキューに追加され、別スレッドで処理される。
+        Add a new notification.
+        The notification is added to a queue and processed in a separate thread.
 
         Args:
-            notification: 追加する通知
+            notification: The notification to add
         """
         self.notification_queue.put(notification)
 
     def _process_notifications(self) -> None:
-        """通知キューを処理するバックグラウンドスレッド"""
+        """Background thread for processing the notification queue"""
         while True:
             try:
                 notification = self.notification_queue.get()
 
-                # 通知をリストに追加
+                # Add notification to list
                 self.notifications.append(notification)
                 if len(self.notifications) > self.max_notifications:
                     self.notifications.pop(0)
 
-                # 通知をファイルに保存
+                # Save notification to file
                 self._save_notification(notification)
 
-                # ハンドラーを呼び出す
+                # Call handlers
                 self._call_handlers(notification)
 
-                # キューの処理完了を通知
+                # Mark queue task as done
                 self.notification_queue.task_done()
 
             except Exception as e:
                 logger.error(f"Error processing notification: {e}")
 
     def _save_notification(self, notification: Notification) -> None:
-        """通知をファイルに保存する"""
+        """Save notification to file"""
         try:
             save_dir = Path.home() / ".roguelike" / "notifications"
             save_dir.mkdir(parents=True, exist_ok=True)
 
-            # 日付ごとにファイルを分ける
+            # Separate files by date
             date_str = notification.timestamp.strftime("%Y-%m-%d")
             file_path = save_dir / f"notifications_{date_str}.json"
 
-            # 既存の通知を読み込む
+            # Load existing notifications
             notifications = []
             if file_path.exists():
                 with file_path.open("r", encoding="utf-8") as f:
                     notifications = json.load(f)
 
-            # 新しい通知を追加
+            # Add new notification
             notifications.append(notification.to_dict())
 
-            # ファイルに保存
+            # Save to file
             with file_path.open("w", encoding="utf-8") as f:
                 json.dump(notifications, f, ensure_ascii=False, indent=2)
 
@@ -136,17 +136,17 @@ class NotificationManager:
 
     def add_handler(self, level: str, handler: Callable[[Notification], None]) -> None:
         """
-        通知ハンドラーを追加する。
+        Add a notification handler.
 
         Args:
-            level: 通知レベル ('error', 'warning', 'info')
-            handler: 通知を処理するコールバック関数
+            level: Notification level ('error', 'warning', 'info')
+            handler: Callback function to handle the notification
         """
         if level in self.handlers:
             self.handlers[level].append(handler)
 
     def _call_handlers(self, notification: Notification) -> None:
-        """通知に対応するハンドラーを呼び出す"""
+        """Call handlers for the notification"""
         for handler in self.handlers.get(notification.level, []):
             try:
                 handler(notification)
@@ -160,15 +160,15 @@ class NotificationManager:
         end_time: Optional[datetime] = None,
     ) -> List[Notification]:
         """
-        条件に一致する通知を取得する。
+        Get notifications matching the conditions.
 
         Args:
-            level: フィルタする通知レベル
-            start_time: 開始時刻
-            end_time: 終了時刻
+            level: Filter by notification level
+            start_time: Start time
+            end_time: End time
 
         Returns:
-            条件に一致する通知のリスト
+            List of notifications matching the conditions
         """
         filtered = self.notifications
 
@@ -184,11 +184,11 @@ class NotificationManager:
         return filtered
 
     def clear_notifications(self) -> None:
-        """全ての通知をクリアする"""
+        """Clear all notifications"""
         self.notifications.clear()
 
     def get_notification_stats(self) -> Dict[str, Any]:
-        """通知の統計情報を取得する"""
+        """Get notification statistics"""
         stats = {
             "total": len(self.notifications),
             "by_level": {"error": 0, "warning": 0, "info": 0},

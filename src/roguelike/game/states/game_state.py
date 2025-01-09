@@ -23,6 +23,7 @@ class GameStates(Enum):
     CHARACTER_SCREEN = auto()
     SAVE_GAME = auto()
     LOAD_GAME = auto()
+    ACHIEVEMENTS = auto()
 
 
 @dataclass

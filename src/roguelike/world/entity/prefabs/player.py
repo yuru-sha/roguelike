@@ -2,11 +2,6 @@
 Player entity prefab.
 """
 
-# TODO: Add player experience and leveling system
-# TODO: Add player skills and abilities
-# FIXME: Initial player stats should be loaded from configuration
-# TODO: Add equipment bonus calculations
-# TODO: Add inventory weight system
 
 from typing import Any, Tuple
 

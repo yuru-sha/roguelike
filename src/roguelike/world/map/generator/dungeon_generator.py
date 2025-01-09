@@ -5,7 +5,7 @@ import numpy as np
 
 from roguelike.core.constants import (MAP_HEIGHT, MAP_WIDTH, MAX_ROOMS,
                                       ROOM_MAX_SIZE, ROOM_MIN_SIZE)
-from roguelike.utils.logging import GameLogger
+from roguelike.utils.game_logger import GameLogger
 from roguelike.world.map.room import (Rect, create_h_tunnel, create_room,
                                       create_v_tunnel)
 from roguelike.world.map.tiles import Tile, TileType, initialize_tiles

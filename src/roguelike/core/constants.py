@@ -4,10 +4,6 @@ Game constants.
 
 from enum import Enum, auto
 
-# TODO: Add configuration file support for game settings
-# TODO: Add difficulty level settings
-# FIXME: Some constants should be calculated based on screen size
-
 # Screen dimensions
 SCREEN_WIDTH = 80
 SCREEN_HEIGHT = 50
@@ -42,9 +38,6 @@ INVENTORY_WIDTH = 50
 LEVEL_SCREEN_WIDTH = 40
 CHARACTER_SCREEN_WIDTH = 30
 
-# TODO: Add more configurable constants for game balance
-# FIXME: Magic numbers should be explained or renamed
-
 
 # Game states
 class GameStates(Enum):
@@ -62,25 +55,25 @@ class GameStates(Enum):
 class EquipmentSlot(Enum):
     """Equipment slot types."""
 
-    # 防具スロット
-    HEAD = 1  # 頭部防具
-    BODY = 2  # 胴体防具
-    ARMS = 3  # 腕部防具
-    LEGS = 4  # 脚部防具
-    FEET = 5  # 足部防具
-    CLOAK = 6  # マント
+    # Armor slots
+    HEAD = 1  # Head armor
+    BODY = 2  # Body armor
+    ARMS = 3  # Arm armor
+    LEGS = 4  # Leg armor
+    FEET = 5  # Foot armor
+    CLOAK = 6  # Cloak
 
-    # 武器スロット
-    MAIN_HAND = 11  # 主手（武器）
-    OFF_HAND = 12  # 副手（盾など）
+    # Weapon slots
+    MAIN_HAND = 11  # Main hand (weapon)
+    OFF_HAND = 12  # Off hand (shield etc.)
 
-    # アクセサリースロット
-    NECK = 21  # 首飾り
-    RING_LEFT = 22  # 左手の指輪
-    RING_RIGHT = 23  # 右手の指輪
+    # Accessory slots
+    NECK = 21  # Necklace
+    RING_LEFT = 22  # Left hand ring
+    RING_RIGHT = 23  # Right hand ring
 
-    # 特殊スロット
-    AMULET = 31  # イェンダーの魔除け（特殊アイテム）
+    # Special slots
+    AMULET = 31  # Amulet of Yendor (special item)
 
     @classmethod
     def from_value(cls, value: int) -> "EquipmentSlot":
@@ -127,9 +120,9 @@ class EquipmentSlot(Enum):
 class WeaponType(Enum):
     """Weapon types."""
 
-    ONE_HANDED = 1  # 片手武器
-    TWO_HANDED = 2  # 両手武器
-    BOW = 3  # 弓
+    ONE_HANDED = 1  # One-handed weapon
+    TWO_HANDED = 2  # Two-handed weapon
+    BOW = 3  # Bow
 
 
 # Colors

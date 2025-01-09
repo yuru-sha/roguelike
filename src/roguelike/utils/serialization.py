@@ -149,44 +149,37 @@ def validate_save_data(data: Dict[str, Any]) -> bool:
 
 
 class SaveError(Exception):
-    """セーブ関連のエラーの基底クラス"""
-
+    """Base class for save-related errors"""
     pass
 
 
 class SaveFileNotFoundError(SaveError):
-    """セーブファイルが見つからない場合のエラー"""
-
+    """Error when save file is not found"""
     pass
 
 
 class SaveFileCorruptedError(SaveError):
-    """セーブファイルが破損している場合のエラー"""
-
+    """Error when save file is corrupted"""
     pass
 
 
 class SaveVersionError(SaveError):
-    """セーブデータのバージョンが非互換の場合のエラー"""
-
+    """Error when save data version is incompatible"""
     pass
 
 
 class SaveEncryptionError(SaveError):
-    """暗号化/復号化に関するエラー"""
-
+    """Error related to encryption/decryption"""
     pass
 
 
 class SaveCompressionError(SaveError):
-    """圧縮/展開に関するエラー"""
-
+    """Error related to compression/decompression"""
     pass
 
 
 class SaveValidationError(SaveError):
-    """セーブデータの検証に失敗した場合のエラー"""
-
+    """Error when save data validation fails"""
     def __init__(self, message: str, validation_errors: Dict[str, str]):
         super().__init__(message)
         self.validation_errors = validation_errors
@@ -252,14 +245,12 @@ class SaveManager:
 
     COMPRESSION_LEVEL = 9  # Maximum compression
     SALT_SIZE = 16
-    _save_dir = Path("data/save")  # デフォルトのセーブディレクトリ
+    _save_dir = Path("data/save")  # Default save directory
 
-    # 圧縮設定
+    # Compression settings
     COMPRESSION_CHUNK_SIZE = 16 * 1024  # 16KB chunks
     COMPRESSION_WBITS = 31  # Enable gzip format with maximum window size
-    COMPRESSION_STRATEGY = (
-        3  # Use Z_RLE strategy for better compression of repeated data
-    )
+    COMPRESSION_STRATEGY = zlib.Z_DEFAULT_STRATEGY  # Default compression strategy
 
     @classmethod
     def get_save_dir(cls) -> Path:
