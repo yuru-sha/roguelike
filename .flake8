@@ -1,0 +1,29 @@
+[flake8]
+# 行の長さ制限
+max-line-length = 120
+
+# 無視するエラー
+ignore =
+    # E203: ':'の前後のスペース（blackと競合）
+    E203,
+    # W503: 演算子の改行位置（blackと競合）
+    W503
+
+# 除外するディレクトリ/ファイル
+exclude =
+    .git,
+    .venv,
+    __pycache__,
+    build,
+    dist,
+    *.pyc,
+    *.egg-info
+
+# 複雑度の最大値
+max-complexity = 10
+
+# インポートの順序チェックを無効化（isortで管理）
+ignore-imports = True
+
+# docstringのチェックを有効化
+docstring-convention = google 
