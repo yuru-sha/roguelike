@@ -1,5 +1,5 @@
 """
-Game actions that can be performed by entities.
+Base action classes for the game.
 """
 
 from typing import TYPE_CHECKING, Optional, Tuple
@@ -89,4 +89,4 @@ class UseStairsAction(Action):
 
             return f"You ascend to dungeon level {engine.game_state.dungeon_level}."
 
-        return "There are no stairs here."
+        return "There are no stairs here." 

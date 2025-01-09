@@ -1,27 +1,23 @@
 """
-Save/Load game screen implementation.
+Save/Load screen implementation.
 """
 
 import logging
-from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Optional
 
 import tcod
-import tcod.event
 
-from roguelike.core.constants import SCREEN_HEIGHT, SCREEN_WIDTH, Colors
-from roguelike.utils.serialization import SaveManager
+from roguelike.core.constants import SCREEN_WIDTH, SCREEN_HEIGHT, Colors
+from roguelike.game.states.game_state import GameStates
 
 logger = logging.getLogger(__name__)
 
-
 class SaveLoadScreen:
-    """Screen for saving and loading games."""
+    """Handles the save/load screen interface."""
 
-    def __init__(self, console: tcod.console.Console, is_save: bool = True):
-        """
-        Initialize the save/load screen.
-
+    def __init__(self, console: Any, is_save: bool = True):
+        """Initialize the save/load screen.
+        
         Args:
             console: The console to render to
             is_save: True for save screen, False for load screen
@@ -29,73 +25,79 @@ class SaveLoadScreen:
         self.console = console
         self.is_save = is_save
         self.selected_slot = 0
-        self.saves: Dict[int, datetime] = {}
-        self._refresh_saves()
-
-    def _refresh_saves(self) -> None:
-        """Refresh the list of save files."""
-        saves = SaveManager.list_saves()
-        self.saves.clear()
-
-        for slot, path in saves.items():
-            try:
-                if path.exists():
-                    timestamp = datetime.fromtimestamp(path.stat().st_mtime)
-                    self.saves[slot] = timestamp
-            except (OSError, ValueError) as e:
-                logger.error(f"Error reading save file {path}: {e}")
-                continue
+        self.title = "Save Game" if is_save else "Load Game"
 
     def render(self) -> None:
-        """Render the screen."""
-        self.console.clear()
+        """Render the save/load screen."""
+        try:
+            # Clear the screen
+            self.console.clear()
 
-        # Draw title
-        title = "Save Game" if self.is_save else "Load Game"
-        x = SCREEN_WIDTH // 2 - len(title) // 2
-        self.console.print(x=x, y=2, string=title, fg=Colors.WHITE)
+            # Draw title
+            title_x = SCREEN_WIDTH // 2 - len(self.title) // 2
+            self.console.print(x=title_x, y=5, string=self.title, fg=Colors.WHITE)
 
-        # Draw save slots
-        start_y = 5
-        for i in range(10):  # 10 save slots
-            slot_text = f"Slot {i}"
-            if i in self.saves:
-                timestamp = self.saves[i].strftime("%Y-%m-%d %H:%M:%S")
-                slot_text = f"Slot {i} - {timestamp}"
+            # Draw slot options
+            for i in range(10):
+                text = f"Slot {i}"
+                if i == self.selected_slot:
+                    color = Colors.YELLOW
+                    text = f"> {text} <"
+                else:
+                    color = Colors.WHITE
 
-            color = Colors.YELLOW if i == self.selected_slot else Colors.WHITE
-            self.console.print(x=5, y=start_y + i, string=slot_text, fg=color)
+                x = SCREEN_WIDTH // 2 - len(text) // 2
+                y = 8 + i
+                self.console.print(x=x, y=y, string=text, fg=color)
 
-        # Draw instructions
-        instructions = ["↑/↓: Select slot", "Enter: Confirm", "Esc: Cancel"]
-        start_y = SCREEN_HEIGHT - len(instructions) - 2
-        for i, text in enumerate(instructions):
-            self.console.print(x=5, y=start_y + i, string=text, fg=Colors.LIGHT_GRAY)
+            # Draw instructions
+            instructions = "[↑/↓] Select slot   [Enter] Confirm   [Esc] Cancel"
+            x = SCREEN_WIDTH // 2 - len(instructions) // 2
+            self.console.print(x=x, y=SCREEN_HEIGHT - 3, string=instructions, fg=Colors.LIGHT_GRAY)
 
-    def handle_input(self, event: tcod.event.Event) -> Optional[Dict]:
-        """
-        Handle input events.
+        except Exception as e:
+            logger.error(f"Error rendering save/load screen: {e}")
+            raise
 
+    def handle_input(self, event: Any) -> Optional[dict]:
+        """Handle input events.
+        
         Args:
-            event: The input event
-
+            event: The input event to handle
+            
         Returns:
-            Action dictionary or None
+            Action dict if input was handled, None otherwise
         """
-        if isinstance(event, tcod.event.KeyDown):
-            if event.sym == tcod.event.K_ESCAPE:
-                return {"action": "exit"}
+        try:
+            if isinstance(event, tcod.event.KeyDown):
+                if event.sym == tcod.event.K_ESCAPE:
+                    return {"action": "exit"}
+                elif event.sym == tcod.event.K_UP:
+                    return {"action": "move_cursor", "dy": -1}
+                elif event.sym == tcod.event.K_DOWN:
+                    return {"action": "move_cursor", "dy": 1}
+                elif event.sym == tcod.event.K_RETURN:
+                    return {"action": "select"}
 
-            elif event.sym == tcod.event.K_UP:
+            return None
+
+        except Exception as e:
+            logger.error(f"Error handling input: {e}")
+            raise
+
+    def move_cursor(self, dy: int) -> None:
+        """Move the cursor up or down.
+        
+        Args:
+            dy: Amount to move (-1 for up, 1 for down)
+        """
+        try:
+            if dy < 0:
                 self.selected_slot = max(0, self.selected_slot - 1)
-
-            elif event.sym == tcod.event.K_DOWN:
+            elif dy > 0:
                 self.selected_slot = min(9, self.selected_slot + 1)
+            logger.debug(f"Moved cursor to slot {self.selected_slot}")
 
-            elif event.sym == tcod.event.K_RETURN:
-                if self.is_save:
-                    return {"action": "save", "slot": self.selected_slot}
-                elif self.selected_slot in self.saves:
-                    return {"action": "load", "slot": self.selected_slot}
-
-        return None
+        except Exception as e:
+            logger.error(f"Error moving cursor: {e}")
+            raise

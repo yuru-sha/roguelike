@@ -47,7 +47,7 @@ class ValidatedField:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
-        return self.default
+        return self.__get__(None, None)
 
     def from_dict(self, data: Any) -> Any:
         """Create from dictionary after deserialization."""
@@ -191,7 +191,7 @@ class SerializableComponent:
 
             # Handle ValidatedField
             if isinstance(field_def, ValidatedField):
-                data[name] = value
+                data[name] = value if value is not None else field_def.default
                 continue
 
             # Handle None values
@@ -232,11 +232,7 @@ class SerializableComponent:
             # Handle basic types
             data[name] = value
 
-        return {
-            "__type__": self.__class__.__name__,
-            "__module__": self.__class__.__module__,
-            "data": data,
-        }
+        return data
 
     @classmethod
     def from_dict(cls: Type[T], data: Dict[str, Any]) -> T:

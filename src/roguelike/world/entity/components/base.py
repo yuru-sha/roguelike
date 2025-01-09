@@ -110,20 +110,15 @@ class StatusEffectData:
 class Position(SerializableComponent):
     """Position component."""
 
-    x: int = field(
-        default_factory=lambda: custom_validator(
-            lambda x: 0 <= x < MAP_WIDTH,
-            f"X coordinate must be between 0 and {MAP_WIDTH-1}",
-            0,
-        )
-    )
-    y: int = field(
-        default_factory=lambda: custom_validator(
-            lambda y: 0 <= y < MAP_HEIGHT,
-            f"Y coordinate must be between 0 and {MAP_HEIGHT-1}",
-            0,
-        )
-    )
+    x: int = 0
+    y: int = 0
+
+    def __post_init__(self):
+        """Validate position."""
+        if not (0 <= self.x < MAP_WIDTH):
+            raise ValueError(f"X coordinate must be between 0 and {MAP_WIDTH-1}")
+        if not (0 <= self.y < MAP_HEIGHT):
+            raise ValueError(f"Y coordinate must be between 0 and {MAP_HEIGHT-1}")
 
     def distance_to(self, other: "Position") -> int:
         """Calculate distance to another position."""
@@ -145,21 +140,26 @@ class Position(SerializableComponent):
 class Fighter(SerializableComponent):
     """Component for entities that can fight."""
 
-    max_hp: int = field(
-        default_factory=lambda: range_validator(min_value=1, default=30)
-    )
-    hp: int = field(default_factory=lambda: range_validator(min_value=0, default=30))
-    defense: int = field(
-        default_factory=lambda: range_validator(min_value=0, default=2)
-    )
-    power: int = field(default_factory=lambda: range_validator(min_value=0, default=5))
-    xp: int = field(default_factory=lambda: range_validator(min_value=0, default=0))
+    max_hp: int = 30
+    hp: int = 30
+    defense: int = 2
+    power: int = 5
+    xp: int = 0
 
     def __post_init__(self):
-        """Ensure hp doesn't exceed max_hp."""
-        super().__post_init__()
+        """Validate fighter stats."""
+        if self.max_hp < 1:
+            raise ValueError("Maximum HP must be at least 1")
+        if self.hp < 0:
+            raise ValueError("HP cannot be negative")
         if self.hp > self.max_hp:
             self.hp = self.max_hp
+        if self.defense < 0:
+            raise ValueError("Defense cannot be negative")
+        if self.power < 0:
+            raise ValueError("Power cannot be negative")
+        if self.xp < 0:
+            raise ValueError("XP cannot be negative")
 
     def take_damage(self, amount: int) -> int:
         """Take damage and return the amount of damage taken."""
@@ -182,27 +182,24 @@ class Fighter(SerializableComponent):
 class Renderable(SerializableComponent):
     """Component for entities that can be rendered."""
 
-    char: str = field(
-        default_factory=lambda: length_validator(
-            min_length=1, max_length=1, default="?"
-        )
-    )
-    color: Tuple[int, int, int] = field(
-        default_factory=lambda: custom_validator(
-            lambda c: isinstance(c, tuple)
-            and len(c) == 3
-            and all(0 <= x <= 255 for x in c),
-            "Color must be a tuple of 3 integers between 0 and 255",
-            (255, 255, 255),
-        )
-    )
-    render_order: RenderOrder = field(default=RenderOrder.ACTOR)
-    name: str = field(
-        default_factory=lambda: length_validator(
-            min_length=1, max_length=50, default="Unknown"
-        )
-    )
-    always_visible: bool = field(default=False)
+    char: str = "?"
+    color: Tuple[int, int, int] = (255, 255, 255)
+    render_order: RenderOrder = RenderOrder.ACTOR
+    name: str = "Unknown"
+    always_visible: bool = False
+
+    def __post_init__(self):
+        """Validate renderable properties."""
+        if len(self.char) != 1:
+            raise ValueError("Character must be exactly one character long")
+        if not isinstance(self.color, tuple) or len(self.color) != 3:
+            raise ValueError("Color must be a tuple of 3 integers")
+        if not all(0 <= x <= 255 for x in self.color):
+            raise ValueError("Color values must be between 0 and 255")
+        if not isinstance(self.name, str) or len(self.name) < 1:
+            raise ValueError("Name must be a non-empty string")
+        if len(self.name) > 50:
+            raise ValueError("Name must not exceed 50 characters")
 
 
 @ComponentDependency(Fighter)  # Requires Fighter
@@ -220,6 +217,10 @@ class StatusEffects(SerializableComponent):
         source: Optional[int] = None,
     ) -> None:
         """Add or refresh a status effect."""
+        if duration <= 0:
+            raise ValueError("Duration must be positive")
+        if strength < 0:
+            raise ValueError("Strength cannot be negative")
         self.effects[effect] = StatusEffectData(effect, duration, strength, source)
 
     def remove_effect(self, effect: StatusEffect) -> None:
@@ -266,9 +267,14 @@ class StatusEffects(SerializableComponent):
 class Vision(SerializableComponent):
     """Component for entities that can see."""
 
-    range: int = field(default_factory=lambda: range_validator(min_value=1, default=8))
-    can_see_invisible: bool = field(default=False)
-    night_vision: bool = field(default=False)
+    range: int = 8
+    can_see_invisible: bool = False
+    night_vision: bool = False
+
+    def __post_init__(self):
+        """Validate vision properties."""
+        if self.range < 1:
+            raise ValueError("Vision range must be at least 1")
 
     def can_see(self, distance: float) -> bool:
         """Check if entity can see at given distance."""
@@ -306,6 +312,8 @@ class Skills(SerializableComponent):
 
     def add_skill(self, skill_id: str, data: Dict[str, Any]) -> None:
         """Add a new skill."""
+        if not skill_id:
+            raise ValueError("Skill ID cannot be empty")
         self.available_skills[skill_id] = data
         self.cooldowns[skill_id] = 0
 
@@ -347,18 +355,19 @@ class Skills(SerializableComponent):
 class Experience(SerializableComponent):
     """Component for entities that can gain experience."""
 
-    level: int = field(default_factory=lambda: range_validator(min_value=1, default=1))
-    current_xp: int = field(
-        default_factory=lambda: range_validator(min_value=0, default=0)
-    )
+    level: int = 1
+    current_xp: int = 0
     xp_to_next_level: int = field(init=False)
-    skill_points: int = field(
-        default_factory=lambda: range_validator(min_value=0, default=0)
-    )
+    skill_points: int = 0
 
     def __post_init__(self):
-        """Calculate XP needed for next level."""
-        super().__post_init__()
+        """Calculate XP needed for next level and validate."""
+        if self.level < 1:
+            raise ValueError("Level must be at least 1")
+        if self.current_xp < 0:
+            raise ValueError("Current XP cannot be negative")
+        if self.skill_points < 0:
+            raise ValueError("Skill points cannot be negative")
         self.xp_to_next_level = self.calculate_xp_for_level(self.level + 1)
 
     @staticmethod
@@ -368,6 +377,8 @@ class Experience(SerializableComponent):
 
     def add_xp(self, amount: int) -> bool:
         """Add XP and return True if leveled up."""
+        if amount < 0:
+            raise ValueError("XP amount cannot be negative")
         self.current_xp += amount
         if self.current_xp >= self.xp_to_next_level:
             self.level_up()
@@ -410,35 +421,26 @@ class Experience(SerializableComponent):
 class AI(SerializableComponent):
     """AI behavior component."""
 
-    behavior: AIBehavior = field(
-        default_factory=lambda: custom_validator(
-            lambda b: isinstance(b, AIBehavior) or b in [e.value for e in AIBehavior],
-            f"Behavior must be one of: {', '.join(e.value for e in AIBehavior)}",
-            AIBehavior.BASIC,
-        )
-    )
-    turns_confused: int = field(
-        default_factory=lambda: range_validator(min_value=0, default=0)
-    )
-    target_entity: Optional[int] = field(default=None)
-    last_known_position: Optional[Position] = field(default=None)
-    aggression_range: int = field(
-        default_factory=lambda: range_validator(min_value=1, default=8)
-    )
-    flee_threshold: float = field(
-        default_factory=lambda: range_validator(
-            min_value=0.0, max_value=1.0, default=0.3
-        )
-    )
+    behavior: AIBehavior = AIBehavior.BASIC
+    turns_confused: int = 0
+    target_entity: Optional[int] = None
+    last_known_position: Optional[Position] = None
+    aggression_range: int = 8
+    flee_threshold: float = 0.3
 
     def __post_init__(self):
-        """Convert string behavior to enum and validate."""
-        super().__post_init__()
+        """Validate AI properties."""
         if isinstance(self.behavior, str):
             try:
                 self.behavior = AIBehavior(self.behavior)
             except ValueError:
                 raise ValueError(f"Invalid behavior: {self.behavior}")
+        if self.turns_confused < 0:
+            raise ValueError("Turns confused cannot be negative")
+        if self.aggression_range < 1:
+            raise ValueError("Aggression range must be at least 1")
+        if not 0.0 <= self.flee_threshold <= 1.0:
+            raise ValueError("Flee threshold must be between 0 and 1")
 
     def is_confused(self) -> bool:
         """Check if the entity is confused."""
@@ -465,14 +467,14 @@ class AI(SerializableComponent):
 class Inventory(SerializableComponent):
     """Component for entities that can carry items."""
 
-    capacity: int = field(
-        default_factory=lambda: range_validator(min_value=1, default=26)
-    )
+    capacity: int = 26
     items: Dict[int, int] = field(default_factory=dict)  # item_id -> slot_index
 
     def __post_init__(self):
         """Validate inventory state."""
-        super().__post_init__()
+        if self.capacity < 1:
+            raise ValueError("Inventory capacity must be at least 1")
+        
         # Ensure no duplicate slots
         used_slots = set()
         for item_id, slot in self.items.items():
@@ -659,3 +661,73 @@ class Corpse(SerializableComponent):
             raise ValueError(f"Invalid component data format: {component_data}")
 
         return cls(original_name=str(component_data["original_name"]))
+
+
+@ComponentDependency(Position)  # Requires Position
+@dataclass
+class Consumable(SerializableComponent):
+    """Component for items that can be consumed."""
+
+    use_function: Optional[Callable] = None
+    use_args: Optional[Dict[str, Any]] = None
+    targeting: bool = False
+    targeting_message: Optional[str] = None
+    number_of_uses: int = 1
+
+    def __post_init__(self):
+        """Validate consumable properties."""
+        if self.number_of_uses < 1:
+            raise ValueError("Number of uses must be at least 1")
+
+    def use(self, *args, **kwargs) -> bool:
+        """Use the item and return True if successful."""
+        if self.use_function is None:
+            return False
+        
+        if self.number_of_uses <= 0:
+            return False
+
+        result = self.use_function(*args, **kwargs)
+        if result:
+            self.number_of_uses -= 1
+        return result
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for serialization."""
+        return {
+            "__type__": self.__class__.__name__,
+            "__module__": self.__class__.__module__,
+            "data": {
+                "use_function": f"{self.use_function.__module__}.{self.use_function.__name__}"
+                if self.use_function
+                else None,
+                "use_args": self.use_args,
+                "targeting": self.targeting,
+                "targeting_message": self.targeting_message,
+                "number_of_uses": self.number_of_uses,
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Consumable":
+        """Create from dictionary after deserialization."""
+        component_data = data.get("data", data)
+        
+        # use_functionの処理
+        use_function_path = component_data.get("use_function")
+        use_function = None
+        if use_function_path:
+            try:
+                module_name, function_name = use_function_path.rsplit(".", 1)
+                module = __import__(module_name, fromlist=[function_name])
+                use_function = getattr(module, function_name)
+            except (ValueError, ImportError, AttributeError) as e:
+                logger.warning(f"Failed to load use_function {use_function_path}: {e}")
+
+        return cls(
+            use_function=use_function,
+            use_args=component_data.get("use_args"),
+            targeting=bool(component_data.get("targeting", False)),
+            targeting_message=component_data.get("targeting_message"),
+            number_of_uses=int(component_data.get("number_of_uses", 1))
+        )

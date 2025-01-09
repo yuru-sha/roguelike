@@ -1,3 +1,8 @@
+"""
+Game logging system.
+Provides a singleton logger for the game with file and console output.
+"""
+
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
@@ -16,8 +21,8 @@ class GameLogger:
             raise RuntimeError("GameLogger is a singleton. Use get_instance() instead.")
 
         # Create logs directory if it doesn't exist
-        logs_dir = Path(__file__).parents[3] / "logs"  # プロジェクトルートの logs/ ディレクトリ
-        logs_dir.mkdir(exist_ok=True)
+        self.logs_dir = Path(__file__).parents[3] / "data" / "logs"
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
 
         # Configure logging
         self.logger = logging.getLogger("roguelike")
@@ -27,11 +32,11 @@ class GameLogger:
         self.logger.handlers.clear()
 
         # Rotate existing log files
-        self._rotate_logs(logs_dir)
+        self._rotate_logs()
 
         # File handler for game logs
         game_handler = logging.FileHandler(
-            logs_dir / "game.log", mode="w", encoding="utf-8"  # 新規作成モード
+            self.logs_dir / "game.log", mode="w", encoding="utf-8"
         )
         game_handler.setLevel(logging.DEBUG)
         game_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
@@ -40,7 +45,7 @@ class GameLogger:
 
         # File handler for error logs
         error_handler = logging.FileHandler(
-            logs_dir / "error.log", mode="w", encoding="utf-8"  # 新規作成モード
+            self.logs_dir / "error.log", mode="w", encoding="utf-8"
         )
         error_handler.setLevel(logging.ERROR)
         error_formatter = logging.Formatter(
@@ -58,40 +63,24 @@ class GameLogger:
         console_handler.setFormatter(console_formatter)
         self.logger.addHandler(console_handler)
 
-        # 起動時のメッセージを記録
+        # Log initialization
         self.logger.info("Logging system initialized")
 
-    def _rotate_logs(self, logs_dir: Path) -> None:
-        """
-        Rotate existing log files.
-
-        Args:
-            logs_dir: Directory containing log files
-        """
-        # Rotate game logs
-        for i in range(4, 0, -1):  # Keep 5 backup files
-            old_file = logs_dir / f"game.log.{i}"
-            new_file = logs_dir / f"game.log.{i+1}"
-            if old_file.exists():
-                old_file.rename(new_file)
-        game_log = logs_dir / "game.log"
-        if game_log.exists():
-            game_log.rename(logs_dir / "game.log.1")
-
-        # Rotate error logs
-        for i in range(4, 0, -1):  # Keep 5 backup files
-            old_file = logs_dir / f"error.log.{i}"
-            new_file = logs_dir / f"error.log.{i+1}"
-            if old_file.exists():
-                old_file.rename(new_file)
-        error_log = logs_dir / "error.log"
-        if error_log.exists():
-            error_log.rename(logs_dir / "error.log.1")
+    def _rotate_logs(self) -> None:
+        """Rotate existing log files."""
+        for log_type in ["game", "error"]:
+            for i in range(4, 0, -1):  # Keep 5 backup files
+                old_file = self.logs_dir / f"{log_type}.log.{i}"
+                new_file = self.logs_dir / f"{log_type}.log.{i+1}"
+                if old_file.exists():
+                    old_file.rename(new_file)
+            current_log = self.logs_dir / f"{log_type}.log"
+            if current_log.exists():
+                current_log.rename(self.logs_dir / f"{log_type}.log.1")
 
     @classmethod
     def get_instance(cls) -> logging.Logger:
-        """
-        Get the singleton instance of the logger.
+        """Get the singleton instance of the logger.
 
         Returns:
             The logger instance
@@ -103,3 +92,8 @@ class GameLogger:
     def __getattr__(self, name: str) -> Any:
         """Delegate unknown attributes to the logger."""
         return getattr(self.logger, name)
+
+
+def setup_logging() -> None:
+    """Initialize the logging system."""
+    GameLogger.get_instance() 
