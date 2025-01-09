@@ -8,27 +8,28 @@ import traceback
 from pathlib import Path
 
 import tcod
-import tcod.libtcodpy
 import tcod.console
 import tcod.context
+import tcod.libtcodpy
 
 from roguelike.core.engine import Engine
 from roguelike.utils.logging import GameLogger
 
 logger = GameLogger.get_instance()
 
+
 def main() -> None:
     """Main entry point for the game."""
     try:
         # Initialize logging
         logger.info("Starting game")
-        
+
         # Initialize game engine
         engine = Engine()
-        
+
         # Run game loop
         engine.run()
-        
+
     except KeyboardInterrupt:
         logger.info("Game interrupted by user")
     except SystemExit:
@@ -39,5 +40,6 @@ def main() -> None:
     finally:
         logger.info("Game terminated")
 
+
 if __name__ == "__main__":
-    main() 
+    main()

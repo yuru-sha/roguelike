@@ -45,6 +45,7 @@ CHARACTER_SCREEN_WIDTH = 30
 # TODO: Add more configurable constants for game balance
 # FIXME: Magic numbers should be explained or renamed
 
+
 # Game states
 class GameStates(Enum):
     PLAYERS_TURN = auto()
@@ -56,39 +57,41 @@ class GameStates(Enum):
     LEVEL_UP = auto()
     CHARACTER_SCREEN = auto()
 
+
 # Equipment slots
 class EquipmentSlot(Enum):
     """Equipment slot types."""
+
     # 防具スロット
-    HEAD = 1        # 頭部防具
-    BODY = 2        # 胴体防具
-    ARMS = 3        # 腕部防具
-    LEGS = 4        # 脚部防具
-    FEET = 5        # 足部防具
-    CLOAK = 6       # マント
-    
+    HEAD = 1  # 頭部防具
+    BODY = 2  # 胴体防具
+    ARMS = 3  # 腕部防具
+    LEGS = 4  # 脚部防具
+    FEET = 5  # 足部防具
+    CLOAK = 6  # マント
+
     # 武器スロット
-    MAIN_HAND = 11   # 主手（武器）
-    OFF_HAND = 12    # 副手（盾など）
-    
+    MAIN_HAND = 11  # 主手（武器）
+    OFF_HAND = 12  # 副手（盾など）
+
     # アクセサリースロット
-    NECK = 21        # 首飾り
-    RING_LEFT = 22   # 左手の指輪
+    NECK = 21  # 首飾り
+    RING_LEFT = 22  # 左手の指輪
     RING_RIGHT = 23  # 右手の指輪
-    
+
     # 特殊スロット
-    AMULET = 31      # イェンダーの魔除け（特殊アイテム）
+    AMULET = 31  # イェンダーの魔除け（特殊アイテム）
 
     @classmethod
-    def from_value(cls, value: int) -> 'EquipmentSlot':
+    def from_value(cls, value: int) -> "EquipmentSlot":
         """Get EquipmentSlot from integer value."""
         for slot in cls:
             if slot.value == value:
                 return slot
         raise ValueError(f"No EquipmentSlot with value {value}")
-    
+
     @classmethod
-    def from_str(cls, value: str) -> 'EquipmentSlot':
+    def from_str(cls, value: str) -> "EquipmentSlot":
         """Get EquipmentSlot from string value."""
         try:
             # Try to parse as integer first
@@ -102,15 +105,15 @@ class EquipmentSlot(Enum):
                 raise ValueError(f"Invalid EquipmentSlot value: {value}")
 
     @classmethod
-    def from_name(cls, name: str) -> 'EquipmentSlot':
+    def from_name(cls, name: str) -> "EquipmentSlot":
         """Get EquipmentSlot from name string.
-        
+
         Args:
             name: The name of the equipment slot (e.g. 'HEAD', 'BODY')
-            
+
         Returns:
             The corresponding EquipmentSlot enum value
-            
+
         Raises:
             ValueError: If the name is not a valid equipment slot name
         """
@@ -119,16 +122,20 @@ class EquipmentSlot(Enum):
         except KeyError:
             raise ValueError(f"Invalid equipment slot name: {name}")
 
+
 # Weapon types
 class WeaponType(Enum):
     """Weapon types."""
+
     ONE_HANDED = 1  # 片手武器
     TWO_HANDED = 2  # 両手武器
-    BOW = 3         # 弓
+    BOW = 3  # 弓
+
 
 # Colors
 class Colors:
     """Color constants."""
+
     BLACK = (0, 0, 0)
     WHITE = (255, 255, 255)
     RED = (255, 0, 0)
@@ -156,13 +163,13 @@ class Colors:
     CYAN = (0, 255, 255)
     SILVER = (192, 192, 192)
     GOLD = (255, 215, 0)
-    
+
     # Combat colors
     PLAYER_ATK = (255, 255, 0)  # Yellow
-    ENEMY_ATK = (255, 128, 0)   # Orange
-    ENEMY_DIE = (255, 64, 64)   # Light red
-    PLAYER_DIE = (255, 0, 0)    # Red
-    
+    ENEMY_ATK = (255, 128, 0)  # Orange
+    ENEMY_DIE = (255, 64, 64)  # Light red
+    PLAYER_DIE = (255, 0, 0)  # Red
+
     # UI colors
     UI_BORDER = (128, 128, 128)
     UI_BG = (0, 0, 0)
@@ -171,7 +178,7 @@ class Colors:
     UI_BAR_TEXT = (255, 255, 255)
     UI_BAR_FILLED = (0, 255, 0)
     UI_BAR_EMPTY = (128, 0, 0)
-    
+
     # Map colors
     WELCOME_TEXT = (128, 128, 255)
     WALL_FG = (128, 128, 128)
@@ -180,12 +187,13 @@ class Colors:
     GROUND_BG = (0, 0, 0)
     STAIRS_FG = (255, 255, 0)
     STAIRS_BG = (0, 0, 0)
-    
+
     # Map lighting
     LIGHT_WALL = (130, 110, 50)
     LIGHT_GROUND = (200, 180, 50)
     DARK_WALL = (0, 0, 100)
     DARK_GROUND = (50, 50, 150)
+
 
 # Entity settings
 MAX_MONSTERS_PER_ROOM = 3
@@ -209,4 +217,4 @@ WIZARD_MODE_PASSWORD = "wizard"
 SAVE_VERSION = "1.0.0"
 AUTO_SAVE_INTERVAL = 100
 MAX_BACKUP_FILES = 5
-BACKUP_ENABLED = True 
+BACKUP_ENABLED = True
