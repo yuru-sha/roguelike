@@ -151,16 +151,19 @@ class Engine:
             
             # Save game
             if SaveManager.save_game(save_data, slot):
-                self.game_state.add_message("Game saved.", Colors.GREEN)
+                if slot != -1:  # 自動セーブでない場合のみメッセージを表示
+                    self.game_state.add_message("Game saved.", Colors.GREEN)
                 logger.info("Game saved successfully")
                 return True
             else:
-                self.game_state.add_message("Failed to save game!", Colors.RED)
+                if slot != -1:  # 自動セーブでない場合のみメッセージを表示
+                    self.game_state.add_message("Failed to save game!", Colors.RED)
                 logger.error("Failed to save game")
                 return False
                 
         except Exception as e:
-            self.game_state.add_message("Failed to save game!", Colors.RED)
+            if slot != -1:  # 自動セーブでない場合のみメッセージを表示
+                self.game_state.add_message("Failed to save game!", Colors.RED)
             logger.error(f"Error saving game: {e}")
             return False
     
