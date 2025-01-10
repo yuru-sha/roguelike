@@ -9,7 +9,8 @@ from typing import (Any, Callable, ClassVar, Dict, List, Optional, Set, Tuple,
                     Type, Union)
 
 from roguelike.core.constants import (MAP_HEIGHT, MAP_WIDTH, EquipmentSlot,
-                                      WeaponType)
+                                      WeaponType, AIBehavior, RenderOrder,
+                                      StatusEffect)
 from roguelike.world.entity.components.equipment import (Equipment,
                                                          EquipmentSlots)
 from roguelike.world.entity.components.serializable import (
@@ -37,38 +38,6 @@ class ComponentDependency:
 
         cls.validate_dependencies = staticmethod(validate_dependencies)
         return cls
-
-
-class AIBehavior(Enum):
-    """Available AI behaviors."""
-
-    BASIC = "basic"
-    CONFUSED = "confused"
-    AGGRESSIVE = "aggressive"
-    COWARD = "coward"
-    RANGED = "ranged"
-    SUPPORT = "support"
-
-
-class RenderOrder(IntEnum):
-    """Render order for entities."""
-
-    CORPSE = 1
-    ITEM = 2
-    ACTOR = 3
-
-
-class StatusEffect(Enum):
-    """Available status effects."""
-
-    POISONED = "poisoned"
-    BURNING = "burning"
-    FROZEN = "frozen"
-    STUNNED = "stunned"
-    HASTED = "hasted"
-    SLOWED = "slowed"
-    INVISIBLE = "invisible"
-    REGENERATING = "regenerating"
 
 
 @dataclass

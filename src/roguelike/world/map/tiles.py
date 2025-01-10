@@ -1,15 +1,9 @@
 from enum import Enum, auto
 from typing import Any, Dict, List, Tuple, Type, TypeVar
 
+from roguelike.core.constants import TileType
 from roguelike.world.entity.components.serializable import \
     SerializableComponent
-
-
-class TileType(Enum):
-    WALL = auto()
-    FLOOR = auto()
-    STAIRS_DOWN = auto()
-    STAIRS_UP = auto()
 
 
 T = TypeVar("T", bound="Tile")

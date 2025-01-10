@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Set, Any
 import json
 import logging
 
+from roguelike.core.constants import AchievementType
 from roguelike.core.event import Event, EventType, EventManager
 from roguelike.game.quests.statistics import QuestStatisticsManager
 

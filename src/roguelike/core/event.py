@@ -6,6 +6,8 @@ from enum import Enum, auto
 from typing import Any, Callable, Dict, List, Optional, Set
 from weakref import WeakSet
 
+from roguelike.core.constants import EventType
+
 
 class EventType(Enum):
     """Base event types for the game."""

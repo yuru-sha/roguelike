@@ -7,6 +7,8 @@ from typing import Optional, List, Dict, Any, Set
 from dataclasses import dataclass
 from datetime import datetime
 
+from roguelike.core.constants import QuestType, QuestStatus
+
 
 class QuestType(Enum):
     """Types of quests available in the game."""

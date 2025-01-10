@@ -2,7 +2,7 @@
 Game constants.
 """
 
-from enum import Enum, auto
+from enum import Enum, IntEnum, auto
 
 # Screen dimensions
 SCREEN_WIDTH = 80
@@ -41,6 +41,7 @@ CHARACTER_SCREEN_WIDTH = 30
 
 # Game states
 class GameStates(Enum):
+    """Game state enumeration."""
     PLAYERS_TURN = auto()
     ENEMY_TURN = auto()
     PLAYER_DEAD = auto()
@@ -53,27 +54,27 @@ class GameStates(Enum):
 
 # Equipment slots
 class EquipmentSlot(Enum):
-    """Equipment slot types."""
-
-    # Armor slots
-    HEAD = 1  # Head armor
-    BODY = 2  # Body armor
-    ARMS = 3  # Arm armor
-    LEGS = 4  # Leg armor
-    FEET = 5  # Foot armor
-    CLOAK = 6  # Cloak
+    """Equipment slot types based on Angband."""
 
     # Weapon slots
-    MAIN_HAND = 11  # Main hand (weapon)
-    OFF_HAND = 12  # Off hand (shield etc.)
+    MAIN_HAND = 1    # Primary weapon or one-handed/two-handed weapon
+    OFF_HAND = 2     # Secondary weapon or shield (unused when wielding two-handed weapon)
+    AMMO = 3         # Arrows, bolts, or shots
+
+    # Armor slots
+    BODY = 10        # Body armor (armor, robe, etc.)
+    CLOAK = 11       # Cloak (cape, mantle, etc.)
+    HEAD = 12        # Helmet, crown, etc.
+    ARMS = 13        # Arm guards, bracers
+    HANDS = 14       # Gloves, gauntlets
+    LEGS = 15        # Greaves, leg guards
+    FEET = 16        # Boots, shoes
 
     # Accessory slots
-    NECK = 21  # Necklace
-    RING_LEFT = 22  # Left hand ring
-    RING_RIGHT = 23  # Right hand ring
-
-    # Special slots
-    AMULET = 31  # Amulet of Yendor (special item)
+    NECK = 20        # Amulet, necklace
+    RIGHT_RING = 21  # Right hand ring
+    LEFT_RING = 22   # Left hand ring
+    LIGHT = 23       # Light source (lantern, torch)
 
     @classmethod
     def from_value(cls, value: int) -> "EquipmentSlot":
@@ -123,6 +124,137 @@ class WeaponType(Enum):
     ONE_HANDED = 1  # One-handed weapon
     TWO_HANDED = 2  # Two-handed weapon
     BOW = 3  # Bow
+
+
+# Tile types
+class TileType(Enum):
+    """Available tile types."""
+    WALL = auto()
+    FLOOR = auto()
+    STAIRS_DOWN = auto()
+    STAIRS_UP = auto()
+
+
+# AI behaviors
+class AIBehavior(Enum):
+    """Available AI behaviors."""
+    BASIC = "basic"
+    CONFUSED = "confused"
+    AGGRESSIVE = "aggressive"
+    COWARD = "coward"
+    RANGED = "ranged"
+    SUPPORT = "support"
+
+
+# Render order
+class RenderOrder(IntEnum):
+    """Render order for entities."""
+    CORPSE = 1
+    ITEM = 2
+    ACTOR = 3
+
+
+# Status effects
+class StatusEffect(Enum):
+    """Available status effects."""
+    POISONED = "poisoned"
+    BURNING = "burning"
+    FROZEN = "frozen"
+    STUNNED = "stunned"
+    HASTED = "hasted"
+    SLOWED = "slowed"
+    INVISIBLE = "invisible"
+    REGENERATING = "regenerating"
+
+
+# Achievement types
+class AchievementType(Enum):
+    """Available achievement types."""
+    
+    # Basic Achievements
+    FIRST_KILL = auto()          # Slay your first enemy
+    KILL_STREAK = auto()         # Achieve a killing streak
+    DUNGEON_DIVER = auto()       # Reach a specific dungeon level
+    TREASURE_HUNTER = auto()     # Collect specific items
+    SURVIVOR = auto()            # Recover to a specific HP
+    WARRIOR = auto()             # Reach a specific level
+    EQUIPMENT_MASTER = auto()    # Fill all equipment slots
+    SPEED_RUNNER = auto()        # Clear within a specific time
+    PACIFIST = auto()           # Progress without slaying enemies
+    PERFECTIONIST = auto()      # Unlock all achievements
+
+    # Statistics-based Achievements
+    COMBAT_MASTER = auto()       # Based on combat statistics
+    QUEST_MASTER = auto()        # Based on quest completion rate
+    TIME_MASTER = auto()         # Based on playtime
+    EFFICIENCY_MASTER = auto()   # Based on efficiency
+    EXPLORATION_MASTER = auto()  # Based on exploration completion rate
+
+    # Playstyle Achievements
+    BERSERKER = auto()          # Aggressive playstyle
+    TACTICIAN = auto()          # Tactical playstyle
+    COLLECTOR = auto()          # Collector playstyle
+    SPEEDSTER = auto()          # Speed-focused playstyle
+    SURVIVOR_STYLE = auto()     # Survival-focused playstyle
+
+    # Challenge Achievements
+    NO_DAMAGE = auto()          # Clear without taking damage
+    SOLO_CHALLENGE = auto()     # Clear solo
+    TIME_ATTACK = auto()        # Clear with time limit
+    HARD_MODE = auto()          # Clear on hard settings
+    SPECIAL_CONDITION = auto()  # Clear under special conditions
+
+
+# Quest types
+class QuestType(Enum):
+    """Types of quests available in the game."""
+    KILL_ENEMIES = auto()      # Slay specific number/type of enemies
+    COLLECT_ITEMS = auto()     # Gather specific items
+    EXPLORE_LEVELS = auto()    # Reach specific dungeon level
+    SURVIVE_COMBAT = auto()    # Survive in combat
+    FIND_ARTIFACT = auto()     # Find specific artifact
+    ESCORT_NPC = auto()        # Escort NPC
+    CLEAR_AREA = auto()        # Clear all enemies in area
+    TIMED_CHALLENGE = auto()   # Time-limited challenge
+    CRAFT_ITEMS = auto()       # Craft items
+    DISCOVER_LOCATIONS = auto()  # Discover specific locations
+    DEFEAT_BOSS = auto()       # Defeat boss
+    SOLVE_PUZZLE = auto()      # Solve puzzle
+    TRADE_WITH_NPC = auto()    # Trade with NPC
+    GATHER_RESOURCES = auto()  # Gather resources
+    TRAIN_SKILLS = auto()      # Train skills
+
+
+# Quest status
+class QuestStatus(Enum):
+    """Quest status enumeration."""
+    NOT_STARTED = auto()
+    IN_PROGRESS = auto()
+    COMPLETED = auto()
+    FAILED = auto()
+
+
+# Event types
+class EventType(Enum):
+    """Base event types for the game."""
+    ENTITY_MOVED = auto()
+    ENTITY_ATTACKED = auto()
+    ENTITY_DIED = auto()
+    ITEM_PICKED_UP = auto()
+    ITEM_USED = auto()
+    LEVEL_CHANGED = auto()
+    GAME_STATE_CHANGED = auto()
+    MESSAGE_LOG = auto()
+    
+    # Combat related events
+    COMBAT_ATTACK = auto()
+    COMBAT_DAMAGE = auto()
+    COMBAT_MISS = auto()
+    COMBAT_CRITICAL = auto()
+    COMBAT_KILL = auto()
+    COMBAT_EXPERIENCE = auto()
+    COMBAT_LEVEL_UP = auto()
+    EQUIPMENT_CHANGED = auto()
 
 
 # Colors
