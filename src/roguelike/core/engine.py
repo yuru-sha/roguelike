@@ -4,6 +4,7 @@ The main game engine class that coordinates all game systems.
 
 import os
 import sys
+import psutil
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -31,11 +32,13 @@ from roguelike.game.actions.base import (
     ZapAction,
     IdentifyAction,
     DropAction,
+    PickupAction,
 )
 from roguelike.world.map.map_manager import MapManager
 from roguelike.data.save_manager import SaveManager
 from roguelike.ui.handlers.input_handler import InputHandler
 from roguelike.utils.game_logger import GameLogger
+from roguelike.game.actions.handler import ActionHandler
 
 logger = GameLogger.get_instance()
 
@@ -46,6 +49,19 @@ class Engine:
         """Initialize the game engine."""
         logger.info("Initializing game engine")
 
+        # Check for existing game process
+        if not skip_lock_check:
+            current_process = psutil.Process()
+            for proc in psutil.process_iter(['name', 'cmdline']):
+                try:
+                    if proc.pid != current_process.pid:
+                        cmdline = proc.cmdline()
+                        if len(cmdline) >= 2 and 'python' in cmdline[0] and 'roguelike' in cmdline[1]:
+                            logger.error("Game is already running")
+                            raise RuntimeError("Another instance of the game is already running")
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    continue
+
         # Get the project root directory
         project_root = Path(__file__).parents[3]
         assets_path = project_root / "data" / "assets" / "dejavu10x10_gs_tc.png"
@@ -55,22 +71,6 @@ class Engine:
         
         # Initialize achievement system
         self.achievement_manager = AchievementManager.get_instance()
-        
-        # Check for existing lock file
-        self.lock_file = project_root / ".game.lock"
-        if not skip_lock_check:
-            if self.lock_file.exists():
-                logger.error("Game is already running")
-                raise RuntimeError("Another instance of the game is already running")
-
-            # Create lock file
-            try:
-                with self.lock_file.open("w") as f:
-                    f.write(str(os.getpid()))
-                logger.info(f"Created lock file: {self.lock_file}")
-            except Exception as e:
-                logger.error(f"Failed to create lock file: {e}")
-                raise RuntimeError("Failed to create lock file")
 
         # Initialize TCOD
         self.root_console = tcod.console.Console(SCREEN_WIDTH, SCREEN_HEIGHT)
@@ -96,10 +96,7 @@ class Engine:
         self.input_handler = InputHandler()
         self.combat_system = CombatSystem(self.world, self.game_state)
         self.map_manager = MapManager(self.world, self.game_state)
-        self.movement_action = MovementAction(self.world, self.game_state, self.combat_system, self.map_manager)
-        self.item_action = ItemAction(self.world, self.game_state)
-        self.use_item_action = UseItemAction(self.world, self.game_state)
-        self.stairs_action = StairsAction(self.world, self.game_state, self.map_manager)
+        self.action_handler = ActionHandler(self.world, self.game_state, self.combat_system, self.map_manager)
         self.save_manager = SaveManager(self.world, self.game_state, self.map_manager)
 
         # Game state flags
@@ -132,13 +129,6 @@ class Engine:
     def cleanup(self) -> None:
         """Clean up resources before exiting."""
         logger.info("Cleaning up resources")
-        try:
-            if self.lock_file.exists():
-                self.lock_file.unlink()
-                logger.info("Removed lock file")
-        except Exception as e:
-            logger.error(f"Failed to remove lock file: {e}")
-
         if self.context:
             self.context.close()
 
@@ -149,16 +139,24 @@ class Engine:
             logger.debug(f"Handling action: {action_type}")
 
             if action_type == "move":
-                self.movement_action.handle_movement(action)
+                dx = action.get("dx", 0)
+                dy = action.get("dy", 0)
+                movement = MovementAction(dx=dx, dy=dy)
+                movement.perform(self)
                 self.save_manager.check_auto_save()
             elif action_type == "pickup":
-                self.item_action.handle_pickup()
+                pickup = PickupAction(item_id=0)  # Item ID will be determined in handler
+                pickup.perform(self)
                 self.save_manager.check_auto_save()
             elif action_type == "use_item":
-                self.use_item_action.handle_use_item(action)
+                item_id = action.get("item_id")
+                target_pos = action.get("target_pos")
+                use_item = UseItemAction(item_id=item_id, target_pos=target_pos)
+                use_item.perform(self)
                 self.save_manager.check_auto_save()
             elif action_type == "use_stairs":
-                self.stairs_action.handle_stairs(action)
+                stairs = UseStairsAction()
+                stairs.perform(self)
                 self.save_manager.check_auto_save()
             elif action_type == "save_game":
                 self.screen_manager.switch_to_save_screen()

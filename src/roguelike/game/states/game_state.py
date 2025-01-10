@@ -52,6 +52,7 @@ class GameState(SerializableComponent):
     targeting_item: Optional[int] = None
     wizard_mode: bool = False
     auto_save_interval: int = 50  # Number of turns between auto-saves
+    dungeon: Any = None  # Current dungeon map
 
     def __post_init__(self):
         if self.game_messages is None:
@@ -172,3 +173,21 @@ class GameState(SerializableComponent):
             wizard_mode=data["wizard_mode"],
             auto_save_interval=data.get("auto_save_interval", 50),  # Default to 50 if not present
         )
+
+    def change_level(self, new_level: int) -> None:
+        """
+        Change to a specific dungeon level.
+
+        Args:
+            new_level: The dungeon level to change to
+        """
+        old_level = self.dungeon_level
+        self.dungeon_level = new_level
+        if new_level > old_level:
+            self.add_message(
+                f"You descend deeper into the dungeon... (Level {self.dungeon_level})"
+            )
+        else:
+            self.add_message(
+                f"You ascend to an earlier level... (Level {self.dungeon_level})"
+            )

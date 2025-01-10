@@ -40,6 +40,9 @@ class MapManager:
             self.game_state.dungeon_level
         )
 
+        # Set dungeon in game state
+        self.game_state.dungeon = self.dungeon_generator
+
         # Create player
         self.game_state.player = create_player(self.world, *player_pos)
 
@@ -63,6 +66,9 @@ class MapManager:
             self.tiles, player_pos = self.dungeon_generator.generate(
                 self.game_state.dungeon_level
             )
+
+            # Set dungeon in game state
+            self.game_state.dungeon = self.dungeon_generator
 
             # Create player at appropriate position
             self.game_state.player = create_player(self.world, *player_pos)

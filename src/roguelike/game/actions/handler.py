@@ -37,17 +37,19 @@ logger = logging.getLogger(__name__)
 class ActionHandler:
     """Centralized handler for all game actions."""
 
-    def __init__(self, world: Any, game_state: Any, combat_system: Any):
+    def __init__(self, world: Any, game_state: Any, combat_system: Any, map_manager: Any):
         """Initialize the action handler.
         
         Args:
             world: The game world
             game_state: The current game state
             combat_system: The combat system
+            map_manager: The map manager
         """
         self.world = world
         self.game_state = game_state
         self.combat_system = combat_system
+        self.map_manager = map_manager
         self.event_manager = EventManager.get_instance()
 
     def handle_movement(self, action: MovementAction) -> Optional[str]:
@@ -234,6 +236,7 @@ class ActionHandler:
             Descent result message
         """
         self.game_state.change_level(self.game_state.dungeon_level + 1)
+        self.map_manager.change_level()
         return f"You descend to dungeon level {self.game_state.dungeon_level}."
 
     def _handle_ascend(self) -> str:
@@ -249,6 +252,7 @@ class ActionHandler:
             return "You need the Amulet of Yendor to escape!"
 
         self.game_state.change_level(self.game_state.dungeon_level - 1)
+        self.map_manager.change_level()
         return f"You ascend to dungeon level {self.game_state.dungeon_level}."
 
     def handle_search(self, action: SearchAction) -> Optional[str]:
