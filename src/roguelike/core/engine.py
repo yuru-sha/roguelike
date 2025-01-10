@@ -20,10 +20,18 @@ from roguelike.ui.renderer import GameRenderer
 from roguelike.ui.screen_manager import ScreenManager
 from roguelike.game.states.game_state import GameState, GameStates
 from roguelike.game.systems.combat import CombatSystem
-from roguelike.game.actions.movement import MovementAction
-from roguelike.game.actions.item import ItemAction
-from roguelike.game.actions.use_item import UseItemAction
-from roguelike.game.actions.stairs import StairsAction
+from roguelike.game.actions.base import (
+    MovementAction,
+    ItemAction,
+    UseItemAction,
+    UseStairsAction,
+    SearchAction,
+    ReadAction,
+    ThrowAction,
+    ZapAction,
+    IdentifyAction,
+    DropAction,
+)
 from roguelike.world.map.map_manager import MapManager
 from roguelike.data.save_manager import SaveManager
 from roguelike.ui.handlers.input_handler import InputHandler

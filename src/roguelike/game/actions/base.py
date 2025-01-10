@@ -1,92 +1,317 @@
 """
 Base action classes for the game.
+
+This module defines the base action hierarchy for all game actions.
+Actions are divided into several categories:
+- GameAction: Basic game system actions (movement, wait, quit)
+- ItemAction: Item-related actions (pickup, use, equip)
+- DungeonAction: Dungeon interaction actions (stairs, doors, traps)
 """
 
-from typing import TYPE_CHECKING, Optional, Tuple
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional, Dict, Any
+import logging
 
 if TYPE_CHECKING:
     from roguelike.core.engine import Engine
 
+logger = logging.getLogger(__name__)
+
 
 class Action:
+    """Base class for all actions in the game."""
+
     def perform(self, engine: "Engine") -> Optional[str]:
+        """Perform the action.
+        
+        Args:
+            engine: Game engine instance
+            
+        Returns:
+            Optional message to display
+        """
         raise NotImplementedError()
 
 
-class MovementAction(Action):
+@dataclass
+class GameAction(Action):
+    """Base class for game system actions."""
+    pass
+
+
+@dataclass
+class ItemAction(Action):
+    """Base class for item-related actions."""
+    item_id: int
+
+
+@dataclass
+class DungeonAction(Action):
+    """Base class for dungeon interaction actions."""
+    pass
+
+
+@dataclass
+class MovementAction(GameAction):
     """Action for moving in a direction."""
+    dx: int
+    dy: int
 
-    def __init__(self, dx: int, dy: int):
-        self.dx = dx
-        self.dy = dy
+    def perform(self, engine: "Engine") -> Optional[str]:
+        """Perform movement action.
+        
+        Args:
+            engine: Game engine instance
+            
+        Returns:
+            Optional message about the movement result
+        """
+        try:
+            return engine.action_handler.handle_movement(self)
+        except Exception as e:
+            logger.error(f"Error in movement action: {e}", exc_info=True)
+            return f"Movement failed: {str(e)}"
 
 
-class WaitAction(Action):
+@dataclass
+class WaitAction(GameAction):
     """Action for doing nothing and waiting a turn."""
 
-    pass
+    def perform(self, engine: "Engine") -> Optional[str]:
+        """Perform wait action.
+        
+        Args:
+            engine: Game engine instance
+            
+        Returns:
+            Optional message about waiting
+        """
+        return None  # Just pass the turn
 
 
-class QuitAction(Action):
+@dataclass
+class QuitAction(GameAction):
     """Action for quitting the game."""
 
-    pass
-
-
-class UseStairsAction(Action):
     def perform(self, engine: "Engine") -> Optional[str]:
-        """Use stairs to move between dungeon levels."""
-        player_pos = engine.world.component_for_entity(
-            engine.player, engine.components.Position
-        )
-        current_tile = engine.dungeon_generator.tiles[player_pos.y][player_pos.x]
+        """Perform quit action.
+        
+        Args:
+            engine: Game engine instance
+            
+        Returns:
+            Quit message
+        """
+        engine.game_state.running = False
+        return "Quitting game..."
 
-        if current_tile.tile_type == engine.tiles.TileType.STAIRS_DOWN:
-            # Save current position
-            engine.game_state.save_player_position(
-                engine.game_state.dungeon_level, (player_pos.x, player_pos.y)
-            )
 
-            # Go down
-            engine.game_state.dungeon_level += 1
-            engine.generate_floor()
+@dataclass
+class PickupAction(ItemAction):
+    """Action for picking up an item."""
 
-            # Place player at up stairs if returning to a previously visited level
-            prev_pos = engine.game_state.get_player_position(
-                engine.game_state.dungeon_level
-            )
-            if prev_pos:
-                player_pos.x, player_pos.y = prev_pos
-            elif engine.dungeon_generator.stairs_up:
-                player_pos.x, player_pos.y = engine.dungeon_generator.stairs_up
+    def perform(self, engine: "Engine") -> Optional[str]:
+        """Perform pickup action.
+        
+        Args:
+            engine: Game engine instance
+            
+        Returns:
+            Message about pickup result
+        """
+        try:
+            return engine.action_handler.handle_pickup(self)
+        except Exception as e:
+            logger.error(f"Error in pickup action: {e}", exc_info=True)
+            return f"Pickup failed: {str(e)}"
 
-            return f"You descend to dungeon level {engine.game_state.dungeon_level}."
 
-        elif current_tile.tile_type == engine.tiles.TileType.STAIRS_UP:
-            if engine.game_state.dungeon_level == 1:
-                if engine.game_state.player_has_amulet:
-                    engine.game_state.check_victory_condition()
-                    return None
-                return "You need the Amulet of Yendor to escape!"
+@dataclass
+class UseItemAction(ItemAction):
+    """Action for using an item."""
+    target_pos: Optional[tuple[int, int]] = None
 
-            # Save current position
-            engine.game_state.save_player_position(
-                engine.game_state.dungeon_level, (player_pos.x, player_pos.y)
-            )
+    def perform(self, engine: "Engine") -> Optional[str]:
+        """Perform item use action.
+        
+        Args:
+            engine: Game engine instance
+            
+        Returns:
+            Message about item use result
+        """
+        try:
+            return engine.action_handler.handle_use_item(self)
+        except Exception as e:
+            logger.error(f"Error in use item action: {e}", exc_info=True)
+            return f"Item use failed: {str(e)}"
 
-            # Go up
-            engine.game_state.dungeon_level -= 1
-            engine.generate_floor()
 
-            # Place player at down stairs if returning to a previously visited level
-            prev_pos = engine.game_state.get_player_position(
-                engine.game_state.dungeon_level
-            )
-            if prev_pos:
-                player_pos.x, player_pos.y = prev_pos
-            elif engine.dungeon_generator.stairs_down:
-                player_pos.x, player_pos.y = engine.dungeon_generator.stairs_down
+@dataclass
+class UseStairsAction(DungeonAction):
+    """Action for using stairs."""
 
-            return f"You ascend to dungeon level {engine.game_state.dungeon_level}."
+    def perform(self, engine: "Engine") -> Optional[str]:
+        """Perform stairs use action.
+        
+        Args:
+            engine: Game engine instance
+            
+        Returns:
+            Message about stairs use result
+        """
+        try:
+            return engine.action_handler.handle_stairs(self)
+        except Exception as e:
+            logger.error(f"Error in stairs action: {e}", exc_info=True)
+            return f"Stairs use failed: {str(e)}"
 
-        return "There are no stairs here." 
+
+@dataclass
+class SearchAction(GameAction):
+    """Action for searching adjacent squares for traps and secret doors."""
+
+    def perform(self, engine: "Engine") -> Optional[str]:
+        """Perform search action.
+        
+        Args:
+            engine: Game engine instance
+            
+        Returns:
+            Message about search result
+        """
+        # TODO: Check adjacent squares for traps and secret doors
+        # - Reveal hidden traps within 1 tile radius
+        # - Discover secret doors within 1 tile radius
+        # - Chance based on player's level and stats
+        try:
+            return engine.action_handler.handle_search(self)
+        except Exception as e:
+            logger.error(f"Error in search action: {e}", exc_info=True)
+            return f"Search failed: {str(e)}"
+
+
+@dataclass
+class ReadAction(ItemAction):
+    """Action for reading scrolls."""
+
+    def perform(self, engine: "Engine") -> Optional[str]:
+        """Perform read action.
+        
+        Args:
+            engine: Game engine instance
+            
+        Returns:
+            Message about reading result
+        """
+        # TODO: Handle scroll reading
+        # - Check if item is a scroll
+        # - Apply scroll effects
+        # - Handle cursed scrolls
+        try:
+            return engine.action_handler.handle_read(self)
+        except Exception as e:
+            logger.error(f"Error in read action: {e}", exc_info=True)
+            return f"Reading failed: {str(e)}"
+
+
+@dataclass
+class ThrowAction(ItemAction):
+    """Action for throwing items."""
+    target_pos: tuple[int, int]
+
+    def perform(self, engine: "Engine") -> Optional[str]:
+        """Perform throw action.
+        
+        Args:
+            engine: Game engine instance
+            
+        Returns:
+            Message about throwing result
+        """
+        # TODO: Handle item throwing
+        # - Calculate trajectory
+        # - Handle weapon throwing (daggers, darts)
+        # - Handle potion throwing (break and apply effects)
+        # - Handle food throwing (feed pets)
+        try:
+            return engine.action_handler.handle_throw(self)
+        except Exception as e:
+            logger.error(f"Error in throw action: {e}", exc_info=True)
+            return f"Throw failed: {str(e)}"
+
+
+@dataclass
+class ZapAction(ItemAction):
+    """Action for zapping wands."""
+    target_pos: tuple[int, int]
+
+    def perform(self, engine: "Engine") -> Optional[str]:
+        """Perform zap action.
+        
+        Args:
+            engine: Game engine instance
+            
+        Returns:
+            Message about zapping result
+        """
+        # TODO: Handle wand zapping
+        # - Check if item is a wand
+        # - Calculate beam trajectory
+        # - Apply wand effects
+        # - Handle wand charges
+        try:
+            return engine.action_handler.handle_zap(self)
+        except Exception as e:
+            logger.error(f"Error in zap action: {e}", exc_info=True)
+            return f"Zap failed: {str(e)}"
+
+
+@dataclass
+class IdentifyAction(ItemAction):
+    """Action for identifying items."""
+
+    def perform(self, engine: "Engine") -> Optional[str]:
+        """Perform identify action.
+        
+        Args:
+            engine: Game engine instance
+            
+        Returns:
+            Message about identification result
+        """
+        # TODO: Handle item identification
+        # - Check if scroll of identify
+        # - Select item to identify
+        # - Reveal true item name and properties
+        # - Mark similar items as identified
+        try:
+            return engine.action_handler.handle_identify(self)
+        except Exception as e:
+            logger.error(f"Error in identify action: {e}", exc_info=True)
+            return f"Identification failed: {str(e)}"
+
+
+@dataclass
+class DropAction(ItemAction):
+    """Action for dropping items."""
+
+    def perform(self, engine: "Engine") -> Optional[str]:
+        """Perform drop action.
+        
+        Args:
+            engine: Game engine instance
+            
+        Returns:
+            Message about dropping result
+        """
+        # TODO: Handle item dropping
+        # - Check if item can be dropped
+        # - Handle cursed equipment
+        # - Place item on ground
+        # - Remove from inventory
+        try:
+            return engine.action_handler.handle_drop(self)
+        except Exception as e:
+            logger.error(f"Error in drop action: {e}", exc_info=True)
+            return f"Drop failed: {str(e)}" 
