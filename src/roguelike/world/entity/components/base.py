@@ -436,39 +436,85 @@ class AI(SerializableComponent):
 class Inventory(SerializableComponent):
     """Component for entities that can carry items."""
 
-    capacity: int = 26
-    items: Dict[int, int] = field(default_factory=dict)  # item_id -> slot_index
+    capacity: int = 26  # Rogue uses a-z for inventory slots
+    items: Dict[str, int] = field(default_factory=dict)  # slot_key -> item_id
+    quick_slots: Dict[str, str] = field(default_factory=dict)  # key -> slot_key
 
     def __post_init__(self):
         """Validate inventory state."""
         if self.capacity < 1:
             raise ValueError("Inventory capacity must be at least 1")
+        if self.capacity > 26:
+            raise ValueError("Inventory capacity cannot exceed 26 slots")
         
-        # Ensure no duplicate slots
-        used_slots = set()
-        for item_id, slot in self.items.items():
-            if slot in used_slots:
-                raise ValueError(f"Duplicate slot index: {slot}")
-            if slot >= self.capacity:
-                raise ValueError(f"Slot index {slot} exceeds capacity {self.capacity}")
-            used_slots.add(slot)
+        # Validate slot keys
+        for slot in self.items.keys():
+            if not self._is_valid_slot(slot):
+                raise ValueError(f"Invalid slot key: {slot}")
 
-    def add_item(self, item_id: int) -> Optional[int]:
-        """Add an item to the first available slot."""
-        used_slots = set(self.items.values())
+    @staticmethod
+    def _is_valid_slot(slot: str) -> bool:
+        """Check if slot key is valid (a-z)."""
+        return len(slot) == 1 and 'a' <= slot <= 'z'
+
+    @staticmethod
+    def _get_slot_key(index: int) -> str:
+        """Convert numeric index to slot key (0 -> 'a', 1 -> 'b', etc.)."""
+        if not 0 <= index < 26:
+            raise ValueError("Slot index must be between 0 and 25")
+        return chr(ord('a') + index)
+
+    def add_item(self, item_id: int) -> Optional[str]:
+        """Add an item to the first available slot and return the slot key."""
+        used_slots = set(self.items.keys())
         for i in range(self.capacity):
-            if i not in used_slots:
-                self.items[item_id] = i
-                return i
+            slot = self._get_slot_key(i)
+            if slot not in used_slots:
+                self.items[slot] = item_id
+                return slot
         return None
 
-    def remove_item(self, item_id: int) -> Optional[int]:
-        """Remove an item and return its slot number."""
-        return self.items.pop(item_id, None)
+    def remove_item(self, slot: str) -> Optional[int]:
+        """Remove an item from a specific slot and return its ID."""
+        if not self._is_valid_slot(slot):
+            raise ValueError(f"Invalid slot key: {slot}")
+        return self.items.pop(slot, None)
+
+    def get_item(self, slot: str) -> Optional[int]:
+        """Get the item ID in a specific slot."""
+        if not self._is_valid_slot(slot):
+            raise ValueError(f"Invalid slot key: {slot}")
+        return self.items.get(slot)
 
     def is_full(self) -> bool:
         """Check if inventory is full."""
         return len(self.items) >= self.capacity
+
+    def get_items(self) -> Dict[str, int]:
+        """Get all items in the inventory."""
+        return dict(self.items)
+
+    def clear(self) -> None:
+        """Remove all items from inventory."""
+        self.items.clear()
+        self.quick_slots.clear()
+
+    def set_quick_slot(self, key: str, slot: str) -> bool:
+        """Assign a quick slot key to an inventory slot."""
+        if not self._is_valid_slot(slot):
+            return False
+        if slot not in self.items:
+            return False
+        self.quick_slots[key] = slot
+        return True
+
+    def get_quick_slot(self, key: str) -> Optional[str]:
+        """Get the inventory slot assigned to a quick slot key."""
+        return self.quick_slots.get(key)
+
+    def clear_quick_slot(self, key: str) -> None:
+        """Remove a quick slot assignment."""
+        self.quick_slots.pop(key, None)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -477,28 +523,26 @@ class Inventory(SerializableComponent):
             "__module__": self.__class__.__module__,
             "data": {
                 "capacity": self.capacity,
-                "items": self.items if self.items is not None else [],
+                "items": self.items,
+                "quick_slots": self.quick_slots,
             },
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any] | "Inventory") -> "Inventory":
         """Create from dictionary after deserialization."""
-        # Inventoryオブジェクトが直接渡された場合
         if isinstance(data, Inventory):
-            return cls(capacity=data.capacity, items=data.items)
-
-        # 辞書形式の場合
-        if not isinstance(data, dict):
-            raise ValueError(f"Invalid data format for Inventory: {data}")
+            return cls(
+                capacity=data.capacity,
+                items=data.items,
+                quick_slots=data.quick_slots,
+            )
 
         component_data = data.get("data", data)
-        if not isinstance(component_data, dict):
-            raise ValueError(f"Invalid component data format: {component_data}")
-
         return cls(
             capacity=int(component_data["capacity"]),
-            items=component_data.get("items", []),
+            items=component_data.get("items", {}),
+            quick_slots=component_data.get("quick_slots", {}),
         )
 
 
@@ -507,10 +551,50 @@ class Item(SerializableComponent):
     """Item component."""
 
     name: str
+    description: str = ""
     use_function: Optional[Callable] = None
     use_args: Optional[Dict[str, Any]] = None
     targeting: bool = False
     targeting_message: Optional[str] = None
+    stackable: bool = False
+    stack_count: int = 1
+
+    def __post_init__(self):
+        """Validate item properties."""
+        if not self.name:
+            raise ValueError("Item name must not be empty")
+        if self.stack_count < 1:
+            raise ValueError("Stack count must be at least 1")
+        if self.stackable and self.stack_count < 1:
+            raise ValueError("Stackable items must have a positive stack count")
+
+    def get_full_name(self) -> str:
+        """Get the full name of the item, including stack count if applicable."""
+        base_name = self.name
+        if self.stackable and self.stack_count > 1:
+            return f"{base_name} (x{self.stack_count})"
+        return base_name
+
+    def split_stack(self, count: int) -> None:
+        """Split the stack and return a new item with the specified count."""
+        if not self.stackable:
+            raise ValueError("Cannot split non-stackable items")
+        if count >= self.stack_count:
+            raise ValueError("Split count must be less than current stack count")
+        if count < 1:
+            raise ValueError("Split count must be positive")
+        
+        self.stack_count -= count
+
+    def merge_stack(self, other: "Item") -> bool:
+        """Merge another stack into this one. Returns True if successful."""
+        if not self.stackable or not other.stackable:
+            return False
+        if self.name != other.name:
+            return False
+            
+        self.stack_count += other.stack_count
+        return True
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -519,37 +603,37 @@ class Item(SerializableComponent):
             "__module__": self.__class__.__module__,
             "data": {
                 "name": self.name,
+                "description": self.description,
                 "use_function": f"{self.use_function.__module__}.{self.use_function.__name__}"
-                if self.use_function
-                else None,
+                if self.use_function else None,
                 "use_args": self.use_args,
                 "targeting": self.targeting,
                 "targeting_message": self.targeting_message,
+                "stackable": self.stackable,
+                "stack_count": self.stack_count,
             },
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any] | "Item") -> "Item":
         """Create from dictionary after deserialization."""
-        # Itemオブジェクトが直接渡された場合
+        # Handle direct Item object
         if isinstance(data, Item):
             return cls(
                 name=data.name,
+                description=data.description,
                 use_function=data.use_function,
                 use_args=data.use_args,
                 targeting=data.targeting,
                 targeting_message=data.targeting_message,
+                stackable=data.stackable,
+                stack_count=data.stack_count,
             )
 
-        # 辞書形式の場合
-        if not isinstance(data, dict):
-            raise ValueError(f"Invalid data format for Item: {data}")
-
+        # Handle dictionary
         component_data = data.get("data", data)
-        if not isinstance(component_data, dict):
-            raise ValueError(f"Invalid component data format: {component_data}")
-
-        # use_functionの処理
+        
+        # Handle use_function
         use_function_path = component_data.get("use_function")
         use_function = None
         if use_function_path:
@@ -562,10 +646,13 @@ class Item(SerializableComponent):
 
         return cls(
             name=str(component_data["name"]),
+            description=str(component_data.get("description", "")),
             use_function=use_function,
             use_args=component_data.get("use_args"),
             targeting=bool(component_data.get("targeting", False)),
             targeting_message=component_data.get("targeting_message"),
+            stackable=bool(component_data.get("stackable", False)),
+            stack_count=int(component_data.get("stack_count", 1)),
         )
 
 
@@ -642,23 +729,41 @@ class Consumable(SerializableComponent):
     targeting: bool = False
     targeting_message: Optional[str] = None
     number_of_uses: int = 1
+    auto_identify: bool = True  # Whether using the item identifies it
 
     def __post_init__(self):
         """Validate consumable properties."""
         if self.number_of_uses < 1:
             raise ValueError("Number of uses must be at least 1")
 
-    def use(self, *args, **kwargs) -> bool:
-        """Use the item and return True if successful."""
+    def use(self, entity_id: int, world: Any, *args, **kwargs) -> bool:
+        """
+        Use the item and return True if successful.
+        
+        Args:
+            entity_id: The ID of the item entity
+            world: The game world
+            *args: Additional arguments for the use function
+            **kwargs: Additional keyword arguments for the use function
+        """
         if self.use_function is None:
             return False
         
         if self.number_of_uses <= 0:
             return False
 
+        # Try to get the Identifiable component if it exists
+        identifiable = None
+        if world.has_component(entity_id, Identifiable):
+            identifiable = world.component_for_entity(entity_id, Identifiable)
+            identifiable.try_item()  # Mark as tried before use
+
         result = self.use_function(*args, **kwargs)
         if result:
             self.number_of_uses -= 1
+            # Auto-identify the item if successful and auto_identify is True
+            if identifiable and self.auto_identify:
+                identifiable.identify()
         return result
 
     def to_dict(self) -> Dict[str, Any]:
@@ -668,12 +773,12 @@ class Consumable(SerializableComponent):
             "__module__": self.__class__.__module__,
             "data": {
                 "use_function": f"{self.use_function.__module__}.{self.use_function.__name__}"
-                if self.use_function
-                else None,
+                if self.use_function else None,
                 "use_args": self.use_args,
                 "targeting": self.targeting,
                 "targeting_message": self.targeting_message,
                 "number_of_uses": self.number_of_uses,
+                "auto_identify": self.auto_identify,
             },
         }
 
@@ -682,7 +787,7 @@ class Consumable(SerializableComponent):
         """Create from dictionary after deserialization."""
         component_data = data.get("data", data)
         
-        # use_functionの処理
+        # Handle use_function
         use_function_path = component_data.get("use_function")
         use_function = None
         if use_function_path:
@@ -698,5 +803,6 @@ class Consumable(SerializableComponent):
             use_args=component_data.get("use_args"),
             targeting=bool(component_data.get("targeting", False)),
             targeting_message=component_data.get("targeting_message"),
-            number_of_uses=int(component_data.get("number_of_uses", 1))
+            number_of_uses=int(component_data.get("number_of_uses", 1)),
+            auto_identify=bool(component_data.get("auto_identify", True))
         )

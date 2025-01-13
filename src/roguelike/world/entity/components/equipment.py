@@ -1,21 +1,34 @@
+"""
+Equipment components for the game.
+"""
+
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
+import random
 
 from roguelike.core.constants import EquipmentSlot, WeaponType
-from roguelike.world.entity.components.serializable import \
-    SerializableComponent
+from roguelike.world.entity.components.serializable import SerializableComponent
+from roguelike.world.entity.components.identification import Identifiable, ItemType
 
 
 @dataclass
 class Equipment(SerializableComponent):
     """Component for items that can be equipped."""
 
-    slot: EquipmentSlot  # 後方互換性のために残す
+    slot: EquipmentSlot
     defense_bonus: int = 0
     power_bonus: int = 0
     max_hp_bonus: int = 0
-    weapon_type: Optional[WeaponType] = None  # 武器の場合のみ設定
+    weapon_type: Optional[WeaponType] = None
+    cursed: bool = False  # 呪われた装備品は外せない
+    enchantment: int = 0  # 武器の場合は攻撃力、防具の場合は防御力の修正値
+    hits_to_identify: int = 10  # 武器を識別するために必要な命中回数
+    tried: bool = False  # 装備を試したかどうか（Rogueの仕様）
+    hit_count: int = 0  # 命中回数のカウント（武器用）
+    damage_dice: Tuple[int, int] = (1, 4)  # (dice_count, dice_sides)
+    hit_bonus: int = 0  # 命中修正値
+    hits_taken: int = 0  # 被弾回数のカウント（防具用）
 
     def __init__(self, slot=None, equipment_slot=None, **kwargs):
         """Initialize Equipment component with either slot or equipment_slot."""
@@ -30,6 +43,66 @@ class Equipment(SerializableComponent):
         self.power_bonus = kwargs.get("power_bonus", 0)
         self.max_hp_bonus = kwargs.get("max_hp_bonus", 0)
         self.weapon_type = kwargs.get("weapon_type", None)
+        self.cursed = kwargs.get("cursed", False)
+        self.enchantment = kwargs.get("enchantment", 0)
+        self.hits_to_identify = kwargs.get("hits_to_identify", 10)
+        self.tried = kwargs.get("tried", False)
+        self.hit_count = kwargs.get("hit_count", 0)
+        self.damage_dice = kwargs.get("damage_dice", (1, 4))
+        self.hit_bonus = kwargs.get("hit_bonus", 0)
+        self.hits_taken = kwargs.get("hits_taken", 0)
+
+    def on_equip(self, item_id: int, world: Any) -> None:
+        """Called when the item is equipped."""
+        # 装備時には識別されないが、試したことになる（Rogueの仕様）
+        self.tried = True
+        if world.has_component(item_id, Identifiable):
+            identifiable = world.component_for_entity(item_id, Identifiable)
+            identifiable.try_item()
+
+    def on_hit(self, item_id: int, world: Any) -> None:
+        """Called when a weapon hits an enemy."""
+        if not self.weapon_type:
+            return
+
+        if world.has_component(item_id, Identifiable):
+            identifiable = world.component_for_entity(item_id, Identifiable)
+            if not identifiable.is_identified:
+                self.hit_count += 1
+                # Rogueの仕様：8-12回の命中で識別
+                if self.hit_count >= self.hits_to_identify:
+                    identifiable.identify()
+
+    def on_take_damage(self, item_id: int, world: Any) -> None:
+        """Called when the wearer takes damage."""
+        if self.weapon_type:
+            return
+
+        if world.has_component(item_id, Identifiable):
+            identifiable = world.component_for_entity(item_id, Identifiable)
+            if not identifiable.is_identified:
+                self.hits_taken += 1
+                # Rogueの仕様：防具は被弾時に20%の確率で識別
+                if random.random() < 0.20:
+                    identifiable.identify()
+
+    def can_unequip(self) -> bool:
+        """Check if the item can be unequipped."""
+        return not self.cursed
+
+    def get_total_bonus(self) -> Tuple[int, int, int]:
+        """Get total bonuses (power, defense, max_hp) including enchantment."""
+        power = self.power_bonus + (self.enchantment if self.weapon_type else 0)
+        defense = self.defense_bonus + (self.enchantment if not self.weapon_type else 0)
+        return power, defense, self.max_hp_bonus
+
+    def roll_damage(self) -> int:
+        """Roll damage for this weapon."""
+        if not self.weapon_type:
+            return 0
+        dice_count, dice_sides = self.damage_dice
+        base_damage = sum(random.randint(1, dice_sides) for _ in range(dice_count))
+        return base_damage + self.enchantment  # エンチャント値を加算
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -37,18 +110,25 @@ class Equipment(SerializableComponent):
             "__type__": self.__class__.__name__,
             "__module__": self.__class__.__module__,
             "data": {
-                "slot": str(self.slot.value),  # 値を文字列として保存
+                "slot": str(self.slot.value),
                 "defense_bonus": self.defense_bonus,
                 "power_bonus": self.power_bonus,
                 "max_hp_bonus": self.max_hp_bonus,
                 "weapon_type": self.weapon_type.name if self.weapon_type else None,
+                "cursed": self.cursed,
+                "enchantment": self.enchantment,
+                "hits_to_identify": self.hits_to_identify,
+                "tried": self.tried,
+                "hit_count": self.hit_count,
+                "damage_dice": self.damage_dice,
+                "hit_bonus": self.hit_bonus,
+                "hits_taken": self.hits_taken,
             },
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any] | "Equipment") -> "Equipment":
         """Create from dictionary after deserialization."""
-        # Equipmentオブジェクトが直接渡された場合
         if isinstance(data, Equipment):
             return cls(
                 slot=data.slot,
@@ -56,41 +136,57 @@ class Equipment(SerializableComponent):
                 power_bonus=data.power_bonus,
                 max_hp_bonus=data.max_hp_bonus,
                 weapon_type=data.weapon_type,
+                cursed=data.cursed,
+                enchantment=data.enchantment,
+                hits_to_identify=data.hits_to_identify,
+                tried=data.tried,
+                hit_count=data.hit_count,
+                damage_dice=data.damage_dice,
+                hit_bonus=data.hit_bonus,
+                hits_taken=data.hits_taken,
             )
 
-        # 辞書形式の場合
-        if not isinstance(data, dict):
-            raise ValueError(f"Invalid data format for Equipment: {data}")
-
         component_data = data.get("data", data)
-        if not isinstance(component_data, dict):
-            raise ValueError(f"Invalid component data format: {component_data}")
 
-        # slotの復元
-        try:
-            slot = EquipmentSlot.from_value(int(component_data["slot"]))  # 値から復元
-        except (KeyError, ValueError) as e:
-            raise ValueError(f"Invalid equipment slot value: {component_data['slot']}")
-
-        # weapon_typeの復元
-        weapon_type = None
-        if component_data.get("weapon_type"):
+        # Handle slot
+        slot_value = component_data.get("slot")
+        if isinstance(slot_value, str):
             try:
-                weapon_type = WeaponType[component_data["weapon_type"]]
-            except KeyError:
-                raise ValueError(
-                    f"Invalid weapon type name: {component_data['weapon_type']}"
-                )
+                slot = EquipmentSlot(slot_value)
+            except ValueError:
+                slot = EquipmentSlot.MAIN_HAND  # Default to main hand if invalid
+        else:
+            slot = EquipmentSlot.MAIN_HAND
 
-        # インスタンスを作成
-        instance = cls(
+        # Handle weapon type
+        weapon_type_name = component_data.get("weapon_type")
+        weapon_type = None
+        if weapon_type_name:
+            try:
+                weapon_type = WeaponType[weapon_type_name]
+            except KeyError:
+                pass
+
+        # Handle damage dice
+        damage_dice = component_data.get("damage_dice", (1, 4))
+        if not isinstance(damage_dice, tuple) or len(damage_dice) != 2:
+            damage_dice = (1, 4)  # Default to 1d4
+
+        return cls(
             slot=slot,
             defense_bonus=int(component_data.get("defense_bonus", 0)),
             power_bonus=int(component_data.get("power_bonus", 0)),
             max_hp_bonus=int(component_data.get("max_hp_bonus", 0)),
             weapon_type=weapon_type,
+            cursed=bool(component_data.get("cursed", False)),
+            enchantment=int(component_data.get("enchantment", 0)),
+            hits_to_identify=int(component_data.get("hits_to_identify", 10)),
+            tried=bool(component_data.get("tried", False)),
+            hit_count=int(component_data.get("hit_count", 0)),
+            damage_dice=damage_dice,
+            hit_bonus=int(component_data.get("hit_bonus", 0)),
+            hits_taken=int(component_data.get("hits_taken", 0)),
         )
-        return instance
 
 
 @dataclass
@@ -100,77 +196,9 @@ class EquipmentSlots(SerializableComponent):
     slots: Dict[EquipmentSlot, Optional[int]] = None  # slot -> equipped entity id
 
     def __post_init__(self):
-        """Initialize items list."""
-        # slotsが未設定の場合のみ初期化
+        """Initialize slots dictionary."""
         if self.slots is None:
             self.slots = {slot: None for slot in EquipmentSlot}
-
-    def _check_weapon_compatibility(
-        self, slot: EquipmentSlot, item: int, world: Any
-    ) -> bool:
-        """
-        Check if a weapon is compatible with current equipment.
-
-        Args:
-            slot: Equipment slot to check
-            item: Item entity ID
-            world: The ECS world
-
-        Returns:
-            True if weapon is compatible, False otherwise
-        """
-        if not world.has_component(item, Equipment):
-            return False
-
-        equipment = world.component_for_entity(item, Equipment)
-
-        # 武器でない場合は互換性チェックをスキップ
-        if equipment.weapon_type is None:
-            return True
-
-        # 両手武器の場合
-        if equipment.weapon_type == WeaponType.TWO_HANDED:
-            # メインハンドとオフハンドの両方が空いている必要がある
-            # ただし、現在装備しようとしているスロットは除外
-            main_hand = self.get_equipped(EquipmentSlot.MAIN_HAND)
-            off_hand = self.get_equipped(EquipmentSlot.OFF_HAND)
-
-            if slot == EquipmentSlot.MAIN_HAND:
-                return off_hand is None
-            elif slot == EquipmentSlot.OFF_HAND:
-                return main_hand is None
-            else:
-                return main_hand is None and off_hand is None
-
-        # 片手武器の場合
-        elif equipment.weapon_type == WeaponType.ONE_HANDED:
-            # 対応するスロットに両手武器が装備されていないことを確認
-            other_slot = (
-                EquipmentSlot.OFF_HAND
-                if slot == EquipmentSlot.MAIN_HAND
-                else EquipmentSlot.MAIN_HAND
-            )
-            other_item = self.get_equipped(other_slot)
-
-            if other_item is not None and world.has_component(other_item, Equipment):
-                other_equipment = world.component_for_entity(other_item, Equipment)
-                return other_equipment.weapon_type != WeaponType.TWO_HANDED
-            return True
-
-        # 弓の場合
-        elif equipment.weapon_type == WeaponType.BOW:
-            # 弓は両手武器として扱う
-            main_hand = self.get_equipped(EquipmentSlot.MAIN_HAND)
-            off_hand = self.get_equipped(EquipmentSlot.OFF_HAND)
-
-            if slot == EquipmentSlot.MAIN_HAND:
-                return off_hand is None
-            elif slot == EquipmentSlot.OFF_HAND:
-                return main_hand is None
-            else:
-                return main_hand is None and off_hand is None
-
-        return True
 
     def equip(self, slot: EquipmentSlot, item: int, world: Any) -> bool:
         """
@@ -200,88 +228,73 @@ class EquipmentSlots(SerializableComponent):
 
         # 両手武器やボウを装備する場合、両手を空ける
         if equipment.weapon_type in [WeaponType.TWO_HANDED, WeaponType.BOW]:
-            self.unequip(EquipmentSlot.MAIN_HAND)
-            self.unequip(EquipmentSlot.OFF_HAND)
+            self.unequip(EquipmentSlot.MAIN_HAND, world)
+            self.unequip(EquipmentSlot.OFF_HAND, world)
 
         # Unequip current item in slot if any
         current = self.get_equipped(slot)
         if current is not None:
-            self.unequip(slot)
+            if not self.can_unequip(current, world):
+                return False
+            self.unequip(slot, world)
 
         # Equip new item
         self.slots[slot] = item
+        equipment.on_equip(item, world)
         return True
 
-    def can_equip_to_slot(self, slot: EquipmentSlot, item: int, world: Any) -> bool:
-        """
-        Check if an item can be equipped to a slot.
-
-        Args:
-            slot: The slot to check
-            item: Item entity ID
-            world: The ECS world
-
-        Returns:
-            True if the item can be equipped, False otherwise
-        """
-        # 基本的な装備可能性チェック
-        if not world.has_component(item, Equipment):
-            return False
-
-        equipment = world.component_for_entity(item, Equipment)
-
-        # スロットの互換性チェック
-        if equipment.slot != slot:
-            return False
-
-        # 武器の互換性チェック
-        return self._check_weapon_compatibility(slot, item, world)
-
-    def __getitem__(self, slot: EquipmentSlot) -> Optional[int]:
-        """Get equipped entity id for slot."""
-        return self.slots[slot]
-
-    def __setitem__(self, slot: EquipmentSlot, entity_id: Optional[int]):
-        """Set equipped entity id for slot."""
-        self.slots[slot] = entity_id
-
-    def __iter__(self):
-        """Iterate over slots."""
-        return iter(self.slots)
-
-    def items(self):
-        """Return items view of slots dictionary."""
-        return self.slots.items()
-
-    def unequip(self, slot: EquipmentSlot) -> Optional[int]:
+    def unequip(self, slot: EquipmentSlot, world: Any) -> Optional[int]:
         """
         Unequip an item from a slot.
 
         Args:
             slot: The slot to unequip from
+            world: The ECS world
 
         Returns:
             The entity ID of the unequipped item, or None
         """
-        old_item = self.slots[slot]
+        item = self.slots[slot]
+        if item is None:
+            return None
+
+        if not self.can_unequip(item, world):
+            return None
+
         self.slots[slot] = None
-        return old_item
+        return item
 
     def get_equipped(self, slot: EquipmentSlot) -> Optional[int]:
-        """
-        Get the item equipped in a slot.
+        """Get the item equipped in a slot."""
+        return self.slots.get(slot)
 
-        Args:
-            slot: The slot to check
+    def can_unequip(self, item: int, world: Any) -> bool:
+        """Check if an item can be unequipped."""
+        if not world.has_component(item, Equipment):
+            return True
 
-        Returns:
-            The entity ID of the equipped item, or None
-        """
-        return self.slots[slot]
+        equipment = world.component_for_entity(item, Equipment)
+        return not equipment.cursed
 
-    def is_empty(self, slot: EquipmentSlot) -> bool:
-        """Check if slot is empty."""
-        return self.slots[slot] is None
+    def _check_weapon_compatibility(self, slot: EquipmentSlot, item: int, world: Any) -> bool:
+        """Check if a weapon can be equipped to a slot."""
+        if not world.has_component(item, Equipment):
+            return False
+
+        equipment = world.component_for_entity(item, Equipment)
+        if not equipment.weapon_type:
+            return True
+
+        # 両手武器は両手が空いている必要がある
+        if equipment.weapon_type in [WeaponType.TWO_HANDED, WeaponType.BOW]:
+            main_hand = self.get_equipped(EquipmentSlot.MAIN_HAND)
+            off_hand = self.get_equipped(EquipmentSlot.OFF_HAND)
+            if main_hand is not None and not self.can_unequip(main_hand, world):
+                return False
+            if off_hand is not None and not self.can_unequip(off_hand, world):
+                return False
+
+        return True
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -289,48 +302,24 @@ class EquipmentSlots(SerializableComponent):
             "__type__": self.__class__.__name__,
             "__module__": self.__class__.__module__,
             "data": {
-                "slots": {
-                    slot.name: entity_id for slot, entity_id in self.slots.items()
-                }
+                "slots": {str(k.value): v for k, v in self.slots.items()},
             },
         }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any] | "EquipmentSlots") -> "EquipmentSlots":
         """Create from dictionary after deserialization."""
-        # EquipmentSlotsオブジェクトが直接渡された場合
         if isinstance(data, EquipmentSlots):
-            instance = cls()
-            instance.slots = data.slots.copy()  # スロットの状態をコピー
-            return instance
-
-        # 辞書形式の場合
-        if not isinstance(data, dict):
-            raise ValueError(f"Invalid data format for EquipmentSlots: {data}")
+            return cls(slots=data.slots)
 
         component_data = data.get("data", data)
-        if not isinstance(component_data, dict):
-            raise ValueError(f"Invalid component data format: {component_data}")
-
         slots_data = component_data.get("slots", {})
-        instance = cls()  # 全スロットをNoneで初期化
-
-        # 全てのスロットを初期化
-        instance.slots = {slot: None for slot in EquipmentSlot}
-
-        # 保存されているスロットを復元
-        for slot_name, entity_id in slots_data.items():
+        slots = {}
+        for k, v in slots_data.items():
             try:
-                # スロット名からEnumを取得
-                slot = EquipmentSlot[slot_name]
-                # entity_idがNoneまたは整数であることを確認
-                if entity_id is not None and not isinstance(entity_id, int):
-                    raise ValueError(
-                        f"Invalid entity ID for slot {slot_name}: {entity_id}"
-                    )
-                instance.slots[slot] = entity_id
-            except KeyError:
-                # エラーメッセージを詳細にする
-                raise ValueError(f"Invalid equipment slot name: {slot_name}")
+                slot = EquipmentSlot(k)
+                slots[slot] = v
+            except ValueError:
+                continue
 
-        return instance
+        return cls(slots=slots)
